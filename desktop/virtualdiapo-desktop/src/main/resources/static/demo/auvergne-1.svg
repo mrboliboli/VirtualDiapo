@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#7696a9"/><stop offset="1" stop-color="#d8c69d"/></linearGradient></defs>
+  <rect width="1920" height="1080" fill="url(#sky)"/><path d="M0 840 L380 500 690 760 1040 350 1480 730 1710 540 1920 720 1920 1080 0 1080Z" fill="#374d3d"/><path d="M0 900 Q420 720 820 870 T1920 820 V1080 H0Z" fill="#7e8251"/><text x="90" y="980" fill="#f4ead2" font-family="serif" font-size="52">PUY DE SANCY — 2026</text>
+</svg>
+
