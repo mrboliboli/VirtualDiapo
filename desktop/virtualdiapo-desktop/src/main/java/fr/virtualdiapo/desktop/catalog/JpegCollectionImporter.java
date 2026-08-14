@@ -16,6 +16,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public final class JpegCollectionImporter {
@@ -30,10 +31,30 @@ public final class JpegCollectionImporter {
 
     public SlideCollection importCollection(String title, String description, Integer year,
                                             List<MultipartFile> images) throws IOException {
+        if (images == null) {
+            throw new IllegalArgumentException("Sélectionnez au moins une image JPEG");
+        }
+        return importSources(title, description, year, images.stream()
+                .map(image -> new ImageSource(image.getOriginalFilename(), () -> open(image)))
+                .toList());
+    }
+
+    public SlideCollection importFiles(String title, String description, Integer year,
+                                       List<Path> images) throws IOException {
+        if (images == null) {
+            throw new IllegalArgumentException("Sélectionnez au moins une image JPEG");
+        }
+        return importSources(title, description, year, images.stream()
+                .map(path -> new ImageSource(path.getFileName().toString(), () -> open(path)))
+                .toList());
+    }
+
+    private SlideCollection importSources(String title, String description, Integer year,
+                                          List<ImageSource> images) throws IOException {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException("Le titre est obligatoire");
         }
-        if (images == null || images.isEmpty()) {
+        if (images.isEmpty()) {
             throw new IllegalArgumentException("Sélectionnez au moins une image JPEG");
         }
 
@@ -47,7 +68,7 @@ public final class JpegCollectionImporter {
                 validateJpeg(image);
                 var slideId = UUID.randomUUID();
                 var target = imageDirectory.resolve(slideId + ".jpg");
-                try (InputStream input = image.getInputStream()) {
+                try (InputStream input = image.open()) {
                     Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
                 }
                 writtenFiles.add(target);
@@ -68,15 +89,50 @@ public final class JpegCollectionImporter {
         }
     }
 
-    private static void validateJpeg(MultipartFile image) throws IOException {
-        if (image == null || image.isEmpty()) {
-            throw new IllegalArgumentException("Une image est vide");
-        }
-        try (var input = ImageIO.createImageInputStream(image.getInputStream())) {
+    private static void validateJpeg(ImageSource image) throws IOException {
+        try (var input = ImageIO.createImageInputStream(image.open())) {
+            if (input == null) {
+                throw new IllegalArgumentException("Le fichier " + image.name() + " n'est pas une image JPEG");
+            }
             var readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext() || !"JPEG".equalsIgnoreCase(readers.next().getFormatName())) {
-                throw new IllegalArgumentException("Seules les images JPEG sont acceptées");
+                throw new IllegalArgumentException("Le fichier " + image.name() + " n'est pas une image JPEG");
             }
+        }
+    }
+
+    private static InputStream open(MultipartFile image) {
+        try {
+            if (image == null || image.isEmpty()) {
+                throw new IllegalArgumentException("Une image est vide");
+            }
+            return image.getInputStream();
+        } catch (IOException exception) {
+            throw new ImageReadException(exception);
+        }
+    }
+
+    private static InputStream open(Path path) {
+        try {
+            return Files.newInputStream(path);
+        } catch (IOException exception) {
+            throw new ImageReadException(exception);
+        }
+    }
+
+    private record ImageSource(String name, Supplier<InputStream> input) {
+        InputStream open() throws IOException {
+            try {
+                return input.get();
+            } catch (ImageReadException exception) {
+                throw (IOException) exception.getCause();
+            }
+        }
+    }
+
+    private static final class ImageReadException extends RuntimeException {
+        private ImageReadException(IOException cause) {
+            super(cause);
         }
     }
 

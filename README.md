@@ -5,10 +5,10 @@ VirtualDiapo recrée une projection manuelle de diapositives numériques sur une
 ## Contenu actuel
 
 - `desktop/virtualdiapo-core` : modèle métier Java sans dépendance à Spring ;
-- `desktop/virtualdiapo-desktop` : serveur Spring Boot, catalogue SQLite et stockage des JPEG ;
+- `desktop/virtualdiapo-desktop` : application JavaFX, serveur Spring Boot, catalogue SQLite et stockage des JPEG ;
 - `player-android` : Player Kotlin/Compose pour Android TV.
 
-L’interface JavaFX et la découverte mDNS ne font pas encore partie de cet incrément.
+La découverte mDNS ne fait pas encore partie de cet incrément.
 
 ## Prérequis
 
@@ -42,6 +42,23 @@ ipconfig getifaddr en0
 
 Le Mac et la TV doivent être sur le même réseau. macOS peut demander l’autorisation d’accepter les connexions entrantes lors du premier lancement.
 
+## Gérer les collections avec l’interface graphique
+
+Arrêter d’abord toute instance du serveur déjà active, puis depuis `desktop` :
+
+```shell
+JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn install
+JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -pl virtualdiapo-desktop javafx:run
+```
+
+La fenêtre démarre également le serveur. Elle permet de :
+
+1. renseigner le titre, la description et l’année ;
+2. sélectionner plusieurs JPEG ;
+3. prévisualiser chaque image ;
+4. modifier leur ordre avec « Monter » et « Descendre » ;
+5. créer la collection, immédiatement disponible sur la TV.
+
 ## Compiler et installer le Player
 
 Ouvrir `player-android` dans Android Studio, ou utiliser le wrapper :
@@ -54,7 +71,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Dans le Player :
 
-1. saisir l’adresse du Mac, par exemple `192.168.1.42:8080` ;
+1. conserver `10.0.2.2:8080` dans l’émulateur Android, ou saisir l’adresse du Mac sur une vraie TV ;
 2. choisir « Charger le projecteur » ;
 3. utiliser droite ou validation pour avancer ;
 4. utiliser gauche pour revenir ;

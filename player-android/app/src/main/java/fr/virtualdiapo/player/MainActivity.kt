@@ -95,7 +95,7 @@ private fun VirtualDiapoApp(viewModel: MainViewModel) {
 
 @Composable
 private fun ConnectionScreen(error: String? = null, onConnect: (String) -> Unit) {
-    var address by remember { mutableStateOf("192.168.1.10:8080") }
+    var address by remember { mutableStateOf("10.0.2.2:8080") }
     val buttonFocus = remember { FocusRequester() }
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(72.dp),

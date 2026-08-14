@@ -76,7 +76,7 @@ class CollectionControllerTest {
 
         mvc.perform(multipart("/api/v1/collections").file(fake).param("title", "Invalide"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Seules les images JPEG sont acceptées"));
+                .andExpect(jsonPath("$.message").value("Le fichier fake.jpg n'est pas une image JPEG"));
     }
 
     private static byte[] jpegBytes() throws IOException {

@@ -47,7 +47,7 @@ Toutes les routes sont relatives à l’adresse du serveur. Le Player reconstrui
 }
 ```
 
-Le contrat est volontairement manuel pour cet incrément. Il sera enrichi seulement lorsque les vrais profils d’images et le cache serveur seront introduits.
+Ce contrat reste utilisable pour les intégrations et les tests ; l’application JavaFX utilise directement le même service d’import.
 
 ## Importer une collection JPEG
 
