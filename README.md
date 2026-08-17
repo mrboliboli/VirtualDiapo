@@ -8,7 +8,7 @@ VirtualDiapo recrée une projection manuelle de diapositives numériques sur une
 - `desktop/virtualdiapo-desktop` : application JavaFX, serveur Spring Boot, catalogue SQLite et stockage des JPEG ;
 - `player-android` : Player Kotlin/Compose pour Android TV.
 
-La découverte mDNS ne fait pas encore partie de cet incrément.
+Le serveur est publié sur le réseau local par mDNS/DNS-SD sous le type `_virtualdiapo._tcp`.
 
 ## Prérequis
 
@@ -72,8 +72,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Dans le Player :
 
-1. conserver `10.0.2.2:8080` dans l’émulateur Android, ou saisir l’adresse du Mac sur une vraie TV ;
-2. choisir « Charger le projecteur » ;
+1. choisir le serveur VirtualDiapo détecté automatiquement, ou conserver `10.0.2.2:8080` dans l’émulateur Android ;
+2. si la découverte n’est pas disponible, saisir manuellement l’adresse du Mac puis choisir « Charger le projecteur » ;
 3. choisir une collection dans la liste ;
 4. utiliser droite ou validation pour avancer ;
 5. utiliser gauche pour revenir ;

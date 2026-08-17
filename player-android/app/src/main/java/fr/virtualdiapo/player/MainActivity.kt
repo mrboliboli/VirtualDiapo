@@ -1,8 +1,6 @@
 package fr.virtualdiapo.player
 
 import android.os.Bundle
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -49,32 +47,46 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import coil3.size.Precision
 import fr.virtualdiapo.player.model.SlideCollection
 import fr.virtualdiapo.player.model.CollectionSummary
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.ProjectionState
+import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
+import fr.virtualdiapo.player.network.DiscoveredServer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    private lateinit var discovery: VirtualDiapoDiscovery
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        window.insetsController?.apply {
-            hide(WindowInsets.Type.systemBars())
-            systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        discovery = VirtualDiapoDiscovery(applicationContext)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val viewModel: MainViewModel = viewModel()
-                VirtualDiapoApp(viewModel)
+                val servers by discovery.servers.collectAsState()
+                VirtualDiapoApp(viewModel, servers)
             }
         }
     }
+
+    override fun onStart() { super.onStart(); discovery.start() }
+    override fun onStop() { discovery.stop(); super.onStop() }
 }
 
 @Composable
@@ -85,10 +97,10 @@ private fun darkColorScheme() = androidx.compose.material3.darkColorScheme(
 )
 
 @Composable
-private fun VirtualDiapoApp(viewModel: MainViewModel) {
+private fun VirtualDiapoApp(viewModel: MainViewModel, servers: List<DiscoveredServer>) {
     val state by viewModel.state.collectAsState()
     when (val current = state) {
-        PlayerUiState.Setup -> ConnectionScreen(onConnect = viewModel::connect)
+        PlayerUiState.Setup -> ConnectionScreen(servers = servers, onConnect = viewModel::connect)
         PlayerUiState.Loading -> LoadingScreen()
         is PlayerUiState.CollectionSelection -> {
             BackHandler(onBack = viewModel::returnToSetup)
@@ -96,7 +108,7 @@ private fun VirtualDiapoApp(viewModel: MainViewModel) {
                 viewModel.selectCollection(current.address, id)
             }
         }
-        is PlayerUiState.Failure -> ConnectionScreen(current.message, viewModel::connect)
+        is PlayerUiState.Failure -> ConnectionScreen(current.message, servers, viewModel::connect)
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)
             ProjectionScreen(current.collection)
@@ -135,7 +147,11 @@ private fun CollectionSelectionScreen(
 }
 
 @Composable
-private fun ConnectionScreen(error: String? = null, onConnect: (String) -> Unit) {
+private fun ConnectionScreen(
+    error: String? = null,
+    servers: List<DiscoveredServer> = emptyList(),
+    onConnect: (String) -> Unit,
+) {
     var address by remember { mutableStateOf("10.0.2.2:8080") }
     val buttonFocus = remember { FocusRequester() }
     Column(
@@ -159,6 +175,14 @@ private fun ConnectionScreen(error: String? = null, onConnect: (String) -> Unit)
             onClick = { onConnect(address) },
             modifier = Modifier.padding(top = 24.dp).focusRequester(buttonFocus),
         ) { Text("Charger le projecteur") }
+        if (servers.isNotEmpty()) {
+            Text("Serveurs détectés", modifier = Modifier.padding(top = 28.dp, bottom = 8.dp))
+            servers.forEach { server ->
+                Button(onClick = { onConnect(server.address) }, modifier = Modifier.padding(top = 6.dp)) {
+                    Text("${server.name} · ${server.address}")
+                }
+            }
+        }
     }
     LaunchedEffect(Unit) { buttonFocus.requestFocus() }
 }
@@ -178,6 +202,9 @@ private fun ProjectionScreen(collection: SlideCollection) {
     val projectionFocus = remember { FocusRequester() }
     var projection by remember(collection.id) { mutableStateOf(ProjectionState(collection.slides.size)) }
     val imageLoader = coil3.SingletonImageLoader.get(context)
+    val displayMetrics = context.resources.displayMetrics
+    val projectionWidth = displayMetrics.widthPixels
+    val projectionHeight = displayMetrics.heightPixels
 
     fun move(delta: Int) {
         val started = projection.beginMove(delta) ?: return
@@ -189,7 +216,13 @@ private fun ProjectionScreen(collection: SlideCollection) {
         }
     }
 
-    PreloadAdjacentImages(collection, projection.currentIndex, imageLoader)
+    PreloadAdjacentImages(
+        collection,
+        projection.currentIndex,
+        imageLoader,
+        projectionWidth,
+        projectionHeight,
+    )
     DisposableEffect(Unit) { onDispose(sound::release) }
 
     Box(
@@ -213,6 +246,8 @@ private fun ProjectionScreen(collection: SlideCollection) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(collection.slides[projection.currentIndex].imageUrl)
+                    .size(projectionWidth, projectionHeight)
+                    .precision(Precision.INEXACT)
                     .crossfade(false)
                     .build(),
                 contentDescription = null,
@@ -226,7 +261,13 @@ private fun ProjectionScreen(collection: SlideCollection) {
 }
 
 @Composable
-private fun PreloadAdjacentImages(collection: SlideCollection, currentIndex: Int, imageLoader: ImageLoader) {
+private fun PreloadAdjacentImages(
+    collection: SlideCollection,
+    currentIndex: Int,
+    imageLoader: ImageLoader,
+    width: Int,
+    height: Int,
+) {
     val context = LocalContext.current
     LaunchedEffect(collection.id, currentIndex) {
         listOf(currentIndex - 1, currentIndex, currentIndex + 1)
@@ -235,7 +276,8 @@ private fun PreloadAdjacentImages(collection: SlideCollection, currentIndex: Int
                 imageLoader.enqueue(
                     ImageRequest.Builder(context)
                         .data(collection.slides[index].imageUrl)
-                        .memoryCacheKey(collection.slides[index].imageUrl)
+                        .size(width, height)
+                        .precision(Precision.INEXACT)
                         .build(),
                 )
             }
