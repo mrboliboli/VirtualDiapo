@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -200,7 +202,16 @@ private fun ProjectionScreen(collection: SlideCollection) {
     val scope = rememberCoroutineScope()
     val sound = remember { MechanicalSoundPlayer() }
     val projectionFocus = remember { FocusRequester() }
-    var projection by remember(collection.id) { mutableStateOf(ProjectionState(collection.slides.size)) }
+    val slideCount = collection.slides.size
+    val projectionSaver = remember(slideCount) {
+        Saver<ProjectionState, Int>(
+            save = { state -> state.settledPosition() },
+            restore = { position -> ProjectionState.restore(slideCount, position) },
+        )
+    }
+    var projection by rememberSaveable(collection.id, stateSaver = projectionSaver) {
+        mutableStateOf(ProjectionState.initial(slideCount))
+    }
     val imageLoader = coil3.SingletonImageLoader.get(context)
     val displayMetrics = context.resources.displayMetrics
     val projectionWidth = displayMetrics.widthPixels
@@ -211,14 +222,24 @@ private fun ProjectionScreen(collection: SlideCollection) {
         projection = started
         sound.play()
         scope.launch {
-            delay(180)
+            delay(220)
             projection = projection.reveal()
         }
     }
 
+    val preloadIndex = when (val state = projection) {
+        is ProjectionState.LoadingFirstSlide -> 0
+        is ProjectionState.Slide -> state.index
+        is ProjectionState.Transition -> when (val destination = state.destination) {
+            is ProjectionState.Destination.Slide -> destination.index
+            ProjectionState.Destination.End -> slideCount - 1
+        }
+        is ProjectionState.EndOfCarousel -> slideCount - 1
+    }
+
     PreloadAdjacentImages(
         collection,
-        projection.currentIndex,
+        preloadIndex,
         imageLoader,
         projectionWidth,
         projectionHeight,
@@ -242,10 +263,11 @@ private fun ProjectionScreen(collection: SlideCollection) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (!projection.black) {
+        val visibleSlide = projection as? ProjectionState.Slide
+        if (visibleSlide != null) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
-                    .data(collection.slides[projection.currentIndex].imageUrl)
+                    .data(collection.slides[visibleSlide.index].imageUrl)
                     .size(projectionWidth, projectionHeight)
                     .precision(Precision.INEXACT)
                     .crossfade(false)
@@ -257,7 +279,14 @@ private fun ProjectionScreen(collection: SlideCollection) {
             )
         }
     }
-    LaunchedEffect(collection.id) { projectionFocus.requestFocus() }
+    LaunchedEffect(collection.id) {
+        projectionFocus.requestFocus()
+        val initialTransition = projection.beginInitialLoad() ?: return@LaunchedEffect
+        projection = initialTransition
+        sound.play()
+        delay(220)
+        projection = projection.reveal()
+    }
 }
 
 @Composable

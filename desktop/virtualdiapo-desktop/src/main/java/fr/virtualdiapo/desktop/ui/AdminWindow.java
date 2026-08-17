@@ -219,7 +219,8 @@ public final class AdminWindow extends Application {
             @Override
             protected SlideCollection call() throws Exception {
                 if (editedCollection != null) {
-                    return management.update(editedCollection.id(), title.getText(), description.getText(), parsedYear);
+                    return importer.updateFiles(
+                            editedCollection.id(), title.getText(), description.getText(), parsedYear, files);
                 }
                 return importer.importFiles(title.getText(), description.getText(), parsedYear, files);
             }

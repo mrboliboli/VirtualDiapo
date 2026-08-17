@@ -57,7 +57,8 @@ La fenêtre démarre également le serveur. Elle permet de :
 2. sélectionner plusieurs JPEG ;
 3. prévisualiser chaque image ;
 4. modifier leur ordre avec « Monter » et « Descendre » ;
-5. sélectionner une collection existante pour modifier ses informations ou la supprimer ;
+5. sélectionner une collection existante pour modifier ses informations et ses images, ou la supprimer ;
+   les boutons « Monter », « Descendre » et « Retirer » modifient l’ordre et la composition ;
 6. enregistrer : le résultat est immédiatement disponible sur la TV.
 
 ## Compiler et installer le Player
