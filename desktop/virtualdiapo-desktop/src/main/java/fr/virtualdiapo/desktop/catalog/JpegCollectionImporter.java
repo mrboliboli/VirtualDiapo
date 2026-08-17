@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.HashMap;
+import java.util.HashSet;
 
 @Service
 public final class JpegCollectionImporter {
@@ -51,6 +53,58 @@ public final class JpegCollectionImporter {
 
     public Path storedImagePath(UUID slideId) {
         return imageDirectory.resolve(slideId + ".jpg");
+    }
+
+    public SlideCollection updateFiles(UUID collectionId, String title, String description, Integer year,
+                                       List<Path> images) throws IOException {
+        if (title == null || title.isBlank()) throw new IllegalArgumentException("Le titre est obligatoire");
+        if (images == null || images.isEmpty()) {
+            throw new IllegalArgumentException("Une collection doit contenir au moins une image JPEG");
+        }
+        var normalized = images.stream().map(path -> path.toAbsolutePath().normalize()).toList();
+        if (new HashSet<>(normalized).size() != normalized.size()) {
+            throw new IllegalArgumentException("Une même image ne peut pas apparaître deux fois");
+        }
+        var current = catalog.findById(collectionId)
+                .orElseThrow(() -> new IllegalArgumentException("Collection introuvable"));
+        var existingByPath = new HashMap<Path, Slide>();
+        current.slides().forEach(slide -> existingByPath.put(storedImagePath(slide.id()), slide));
+        Files.createDirectories(imageDirectory);
+        var slides = new ArrayList<Slide>();
+        var writtenFiles = new ArrayList<Path>();
+        try {
+            for (int position = 0; position < normalized.size(); position++) {
+                var source = normalized.get(position);
+                var existing = existingByPath.get(source);
+                if (existing != null) {
+                    slides.add(new Slide(existing.id(), position, existing.imagePath()));
+                    continue;
+                }
+                var imageSource = new ImageSource(source.getFileName().toString(), () -> open(source));
+                validateJpeg(imageSource);
+                var slideId = UUID.randomUUID();
+                var target = storedImagePath(slideId);
+                try (var input = imageSource.open()) {
+                    Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+                writtenFiles.add(target);
+                slides.add(new Slide(slideId, position, "/api/v1/images/" + slideId + ".jpg"));
+            }
+            var updated = new SlideCollection(collectionId, title.trim(), blankToNull(description), year, slides);
+            catalog.replace(updated);
+            var retained = slides.stream().map(Slide::id).collect(java.util.stream.Collectors.toSet());
+            for (var removed : current.slides()) {
+                if (!retained.contains(removed.id())) {
+                    try { Files.deleteIfExists(storedImagePath(removed.id())); } catch (IOException ignored) { }
+                }
+            }
+            return updated;
+        } catch (IOException | RuntimeException failure) {
+            for (var file : writtenFiles) {
+                try { Files.deleteIfExists(file); } catch (IOException ignored) { failure.addSuppressed(ignored); }
+            }
+            throw failure;
+        }
     }
 
     private SlideCollection importSources(String title, String description, Integer year,

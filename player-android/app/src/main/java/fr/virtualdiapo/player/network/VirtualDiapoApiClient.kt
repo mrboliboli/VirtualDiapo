@@ -9,6 +9,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 class VirtualDiapoApiClient {
     suspend fun loadCollections(address: String): List<CollectionSummary> = withContext(Dispatchers.IO) {
@@ -89,4 +92,12 @@ class VirtualDiapoApiClient {
             slides = slides,
         )
     }
+}
+
+internal fun connectionErrorMessage(error: Throwable): String = when (error) {
+    is SocketTimeoutException -> "Le serveur ne répond pas. Vérifiez le réseau et réessayez."
+    is ConnectException -> "Connexion refusée. Vérifiez que VirtualDiapo est lancé sur le Mac."
+    is UnknownHostException -> "Serveur introuvable. Vérifiez l’adresse ou la connexion réseau."
+    is IllegalArgumentException -> error.message ?: "Adresse du serveur invalide."
+    else -> error.message?.takeIf(String::isNotBlank) ?: "Connexion impossible."
 }

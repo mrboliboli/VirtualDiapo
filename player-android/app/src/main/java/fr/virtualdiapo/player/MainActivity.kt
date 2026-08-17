@@ -31,6 +31,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +63,7 @@ import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.ProjectionState
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.network.DiscoveredServer
+import fr.virtualdiapo.player.network.DiscoveryStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -80,7 +83,8 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val viewModel: MainViewModel = viewModel()
                 val servers by discovery.servers.collectAsState()
-                VirtualDiapoApp(viewModel, servers)
+                val discoveryStatus by discovery.status.collectAsState()
+                VirtualDiapoApp(viewModel, servers, discoveryStatus)
             }
         }
     }
@@ -97,10 +101,18 @@ private fun darkColorScheme() = androidx.compose.material3.darkColorScheme(
 )
 
 @Composable
-private fun VirtualDiapoApp(viewModel: MainViewModel, servers: List<DiscoveredServer>) {
+private fun VirtualDiapoApp(
+    viewModel: MainViewModel,
+    servers: List<DiscoveredServer>,
+    discoveryStatus: DiscoveryStatus,
+) {
     val state by viewModel.state.collectAsState()
     when (val current = state) {
-        PlayerUiState.Setup -> ConnectionScreen(servers = servers, onConnect = viewModel::connect)
+        PlayerUiState.Setup -> ConnectionScreen(
+            servers = servers,
+            discoveryStatus = discoveryStatus,
+            onConnect = viewModel::connect,
+        )
         PlayerUiState.Loading -> LoadingScreen()
         is PlayerUiState.CollectionSelection -> {
             BackHandler(onBack = viewModel::returnToSetup)
@@ -108,7 +120,13 @@ private fun VirtualDiapoApp(viewModel: MainViewModel, servers: List<DiscoveredSe
                 viewModel.selectCollection(current.address, id)
             }
         }
-        is PlayerUiState.Failure -> ConnectionScreen(current.message, servers, viewModel::connect)
+        is PlayerUiState.Failure -> ConnectionScreen(
+            error = current.message,
+            servers = servers,
+            discoveryStatus = discoveryStatus,
+            initialAddress = current.address,
+            onConnect = viewModel::connect,
+        )
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)
             ProjectionScreen(current.collection)
@@ -150,9 +168,11 @@ private fun CollectionSelectionScreen(
 private fun ConnectionScreen(
     error: String? = null,
     servers: List<DiscoveredServer> = emptyList(),
+    discoveryStatus: DiscoveryStatus = DiscoveryStatus.STOPPED,
+    initialAddress: String = "10.0.2.2:8080",
     onConnect: (String) -> Unit,
 ) {
-    var address by remember { mutableStateOf("10.0.2.2:8080") }
+    var address by remember(initialAddress) { mutableStateOf(initialAddress) }
     val buttonFocus = remember { FocusRequester() }
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(72.dp),
@@ -182,6 +202,11 @@ private fun ConnectionScreen(
                     Text("${server.name} · ${server.address}")
                 }
             }
+        } else if (discoveryStatus == DiscoveryStatus.SEARCHING) {
+            Text("Recherche d’un serveur VirtualDiapo…", modifier = Modifier.padding(top = 24.dp))
+        } else if (discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
+            Text("Découverte automatique indisponible — utilisez l’adresse manuelle.",
+                modifier = Modifier.padding(top = 24.dp))
         }
     }
     LaunchedEffect(Unit) { buttonFocus.requestFocus() }
@@ -198,27 +223,70 @@ private fun LoadingScreen() {
 private fun ProjectionScreen(collection: SlideCollection) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sound = remember { MechanicalSoundPlayer() }
+    val sound = remember { MechanicalSoundPlayer(context) }
     val projectionFocus = remember { FocusRequester() }
-    var projection by remember(collection.id) { mutableStateOf(ProjectionState(collection.slides.size)) }
+    val slideCount = collection.slides.size
+    val projectionSaver = remember(slideCount) {
+        Saver<ProjectionState, Int>(
+            save = { state -> state.settledPosition() },
+            restore = { position -> ProjectionState.restore(slideCount, position) },
+        )
+    }
+    var projection by rememberSaveable(collection.id, stateSaver = projectionSaver) {
+        mutableStateOf(ProjectionState.initial(slideCount))
+    }
     val imageLoader = coil3.SingletonImageLoader.get(context)
     val displayMetrics = context.resources.displayMetrics
     val projectionWidth = displayMetrics.widthPixels
     val projectionHeight = displayMetrics.heightPixels
 
-    fun move(delta: Int) {
-        val started = projection.beginMove(delta) ?: return
-        projection = started
-        sound.play()
+    fun imageRequest(index: Int) = ImageRequest.Builder(context)
+        .data(collection.slides[index].imageUrl)
+        .size(projectionWidth, projectionHeight)
+        .precision(Precision.INEXACT)
+        .crossfade(false)
+        .build()
+
+    fun prepareAndRun(preparing: ProjectionState) {
+        projection = preparing
         scope.launch {
-            delay(180)
-            projection = projection.reveal()
+            try {
+                preparing.targetSlideIndex()?.let { targetIndex ->
+                    check(imageLoader.execute(imageRequest(targetIndex)) is coil3.request.SuccessResult) {
+                        "Impossible de préparer la diapositive"
+                    }
+                }
+                sound.awaitReady()
+                val transition = preparing.beginMechanicalTransition() ?: return@launch
+                if (projection != preparing) return@launch
+                projection = transition
+                sound.play()
+                delay(MechanicalSoundPlayer.SLIDE_APPEAR_TIME_MS)
+                if (projection == transition) projection = transition.reveal()
+            } catch (_: Exception) {
+                if (projection == preparing) projection = preparing.cancelPreparation()
+            }
         }
+    }
+
+    fun move(delta: Int) {
+        prepareAndRun(projection.beginMove(delta) ?: return)
+    }
+
+    val preloadIndex = when (val state = projection) {
+        is ProjectionState.LoadingFirstSlide -> 0
+        is ProjectionState.Slide -> state.index
+        is ProjectionState.Preparing -> state.targetSlideIndex() ?: slideCount - 1
+        is ProjectionState.Transition -> when (val destination = state.destination) {
+            is ProjectionState.Destination.Slide -> destination.index
+            ProjectionState.Destination.End -> slideCount - 1
+        }
+        is ProjectionState.EndOfCarousel -> slideCount - 1
     }
 
     PreloadAdjacentImages(
         collection,
-        projection.currentIndex,
+        preloadIndex,
         imageLoader,
         projectionWidth,
         projectionHeight,
@@ -242,14 +310,10 @@ private fun ProjectionScreen(collection: SlideCollection) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (!projection.black) {
+        val visibleSlideIndex = projection.visibleSlideIndex()
+        if (visibleSlideIndex != null) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(collection.slides[projection.currentIndex].imageUrl)
-                    .size(projectionWidth, projectionHeight)
-                    .precision(Precision.INEXACT)
-                    .crossfade(false)
-                    .build(),
+                model = imageRequest(visibleSlideIndex),
                 contentDescription = null,
                 imageLoader = imageLoader,
                 modifier = Modifier.fillMaxSize(),
@@ -257,7 +321,10 @@ private fun ProjectionScreen(collection: SlideCollection) {
             )
         }
     }
-    LaunchedEffect(collection.id) { projectionFocus.requestFocus() }
+    LaunchedEffect(collection.id) {
+        projectionFocus.requestFocus()
+        prepareAndRun(projection.beginInitialLoad() ?: return@LaunchedEffect)
+    }
 }
 
 @Composable

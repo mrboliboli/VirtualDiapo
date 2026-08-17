@@ -13,5 +13,7 @@ public interface CollectionCatalog {
 
     void update(SlideCollection collection);
 
+    void replace(SlideCollection collection);
+
     boolean deleteById(UUID id);
 }

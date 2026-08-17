@@ -94,6 +94,17 @@ public class SqliteCollectionCatalog implements CollectionCatalog {
 
     @Override
     @Transactional
+    public void replace(SlideCollection collection) {
+        update(collection);
+        jdbc.update("DELETE FROM slides WHERE collection_id = ?", collection.id().toString());
+        for (var slide : collection.slides()) {
+            jdbc.update("INSERT INTO slides(id, collection_id, position, image_path) VALUES (?, ?, ?, ?)",
+                    slide.id().toString(), collection.id().toString(), slide.position(), slide.imagePath());
+        }
+    }
+
+    @Override
+    @Transactional
     public boolean deleteById(UUID id) {
         jdbc.update("DELETE FROM slides WHERE collection_id = ?", id.toString());
         return jdbc.update("DELETE FROM collections WHERE id = ?", id.toString()) > 0;

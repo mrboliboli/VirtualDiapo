@@ -1,6 +1,7 @@
 package fr.virtualdiapo.desktop.api;
 
 import fr.virtualdiapo.desktop.VirtualDiapoApplication;
+import fr.virtualdiapo.desktop.catalog.JpegCollectionImporter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,6 +18,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -34,6 +37,9 @@ class CollectionControllerTest {
 
     @Autowired
     private MockMvc mvc;
+
+    @Autowired
+    private JpegCollectionImporter importer;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -61,6 +67,8 @@ class CollectionControllerTest {
                 result.getResponse().getContentAsString(), "$.slides[0].imagePath").toString();
         var collectionId = com.jayway.jsonpath.JsonPath.read(
                 result.getResponse().getContentAsString(), "$.id").toString();
+        var slideId = com.jayway.jsonpath.JsonPath.read(
+                result.getResponse().getContentAsString(), "$.slides[0].id").toString();
 
         mvc.perform(get("/api/v1/collections"))
                 .andExpect(status().isOk())
@@ -73,12 +81,23 @@ class CollectionControllerTest {
                 .andExpect(header().exists("Cache-Control"))
                 .andExpect(content().bytes(jpegBytes()));
 
+        var addedImage = DATA_DIRECTORY.resolve("nouvelle.jpg");
+        Files.write(addedImage, jpegBytes());
+        importer.updateFiles(UUID.fromString(collectionId), "Vacances 2026", "Le lac", 2026,
+                List.of(addedImage, importer.storedImagePath(UUID.fromString(slideId))));
+
+        mvc.perform(get("/api/v1/collections/{id}", collectionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.slides.length()").value(2))
+                .andExpect(jsonPath("$.slides[0].position").value(0))
+                .andExpect(jsonPath("$.slides[1].id").value(slideId));
+
         mvc.perform(put("/api/v1/collections/{id}", collectionId)
                         .contentType("application/json")
                         .content("{\"title\":\"Vacances renommées\",\"description\":\"Nouvelle description\",\"year\":2027}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Vacances renommées"))
-                .andExpect(jsonPath("$.slides.length()").value(1));
+                .andExpect(jsonPath("$.slides.length()").value(2));
 
         mvc.perform(delete("/api/v1/collections/{id}", collectionId))
                 .andExpect(status().isNoContent());
