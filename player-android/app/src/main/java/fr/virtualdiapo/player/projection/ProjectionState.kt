@@ -11,6 +11,18 @@ sealed interface ProjectionState {
         init { require(slideCount > 0); require(index in 0 until slideCount) }
     }
 
+    data class Preparing(
+        override val slideCount: Int,
+        val origin: Destination?,
+        val destination: Destination,
+    ) : ProjectionState {
+        init {
+            require(slideCount > 0)
+            origin?.validate(slideCount)
+            destination.validate(slideCount)
+        }
+    }
+
     data class Transition(override val slideCount: Int, val destination: Destination) : ProjectionState {
         init { require(slideCount > 0); destination.validate(slideCount) }
     }
@@ -29,24 +41,49 @@ sealed interface ProjectionState {
     }
 
     fun beginInitialLoad(): ProjectionState? = when (this) {
-        is LoadingFirstSlide -> Transition(slideCount, Destination.Slide(0))
+        is LoadingFirstSlide -> Preparing(slideCount, null, Destination.Slide(0))
         else -> null
     }
 
     fun beginMove(delta: Int): ProjectionState? {
         if (delta !in setOf(-1, 1)) return null
         return when (this) {
-            is LoadingFirstSlide, is Transition -> null
+            is LoadingFirstSlide, is Preparing, is Transition -> null
             is Slide -> when {
-                delta < 0 && index > 0 -> Transition(slideCount, Destination.Slide(index - 1))
-                delta > 0 && index < slideCount - 1 -> Transition(slideCount, Destination.Slide(index + 1))
-                delta > 0 && index == slideCount - 1 -> Transition(slideCount, Destination.End)
+                delta < 0 && index > 0 -> Preparing(slideCount, Destination.Slide(index), Destination.Slide(index - 1))
+                delta > 0 && index < slideCount - 1 -> Preparing(slideCount, Destination.Slide(index), Destination.Slide(index + 1))
+                delta > 0 && index == slideCount - 1 -> Preparing(slideCount, Destination.Slide(index), Destination.End)
                 else -> null
             }
             is EndOfCarousel -> if (delta < 0) {
-                Transition(slideCount, Destination.Slide(slideCount - 1))
+                Preparing(slideCount, Destination.End, Destination.Slide(slideCount - 1))
             } else null
         }
+    }
+
+    fun beginMechanicalTransition(): ProjectionState? = when (this) {
+        is Preparing -> Transition(slideCount, destination)
+        else -> null
+    }
+
+    fun cancelPreparation(): ProjectionState = when (this) {
+        is Preparing -> when (val source = origin) {
+            null -> LoadingFirstSlide(slideCount)
+            is Destination.Slide -> Slide(slideCount, source.index)
+            Destination.End -> EndOfCarousel(slideCount)
+        }
+        else -> this
+    }
+
+    fun visibleSlideIndex(): Int? = when (this) {
+        is Slide -> index
+        is Preparing -> (origin as? Destination.Slide)?.index
+        else -> null
+    }
+
+    fun targetSlideIndex(): Int? = when (this) {
+        is Preparing -> (destination as? Destination.Slide)?.index
+        else -> null
     }
 
     fun reveal(): ProjectionState = when (this) {
@@ -60,6 +97,11 @@ sealed interface ProjectionState {
     fun settledPosition(): Int = when (this) {
         is LoadingFirstSlide -> -1
         is Slide -> index
+        is Preparing -> when (val source = origin) {
+            null -> -1
+            is Destination.Slide -> source.index
+            Destination.End -> slideCount
+        }
         is Transition -> when (val target = destination) {
             is Destination.Slide -> target.index
             Destination.End -> slideCount

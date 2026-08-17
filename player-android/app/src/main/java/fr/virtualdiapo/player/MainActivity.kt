@@ -200,7 +200,7 @@ private fun LoadingScreen() {
 private fun ProjectionScreen(collection: SlideCollection) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sound = remember { MechanicalSoundPlayer() }
+    val sound = remember { MechanicalSoundPlayer(context) }
     val projectionFocus = remember { FocusRequester() }
     val slideCount = collection.slides.size
     val projectionSaver = remember(slideCount) {
@@ -217,19 +217,43 @@ private fun ProjectionScreen(collection: SlideCollection) {
     val projectionWidth = displayMetrics.widthPixels
     val projectionHeight = displayMetrics.heightPixels
 
-    fun move(delta: Int) {
-        val started = projection.beginMove(delta) ?: return
-        projection = started
-        sound.play()
+    fun imageRequest(index: Int) = ImageRequest.Builder(context)
+        .data(collection.slides[index].imageUrl)
+        .size(projectionWidth, projectionHeight)
+        .precision(Precision.INEXACT)
+        .crossfade(false)
+        .build()
+
+    fun prepareAndRun(preparing: ProjectionState) {
+        projection = preparing
         scope.launch {
-            delay(220)
-            projection = projection.reveal()
+            try {
+                preparing.targetSlideIndex()?.let { targetIndex ->
+                    check(imageLoader.execute(imageRequest(targetIndex)) is coil3.request.SuccessResult) {
+                        "Impossible de préparer la diapositive"
+                    }
+                }
+                sound.awaitReady()
+                val transition = preparing.beginMechanicalTransition() ?: return@launch
+                if (projection != preparing) return@launch
+                projection = transition
+                sound.play()
+                delay(MechanicalSoundPlayer.SLIDE_APPEAR_TIME_MS)
+                if (projection == transition) projection = transition.reveal()
+            } catch (_: Exception) {
+                if (projection == preparing) projection = preparing.cancelPreparation()
+            }
         }
+    }
+
+    fun move(delta: Int) {
+        prepareAndRun(projection.beginMove(delta) ?: return)
     }
 
     val preloadIndex = when (val state = projection) {
         is ProjectionState.LoadingFirstSlide -> 0
         is ProjectionState.Slide -> state.index
+        is ProjectionState.Preparing -> state.targetSlideIndex() ?: slideCount - 1
         is ProjectionState.Transition -> when (val destination = state.destination) {
             is ProjectionState.Destination.Slide -> destination.index
             ProjectionState.Destination.End -> slideCount - 1
@@ -263,15 +287,10 @@ private fun ProjectionScreen(collection: SlideCollection) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        val visibleSlide = projection as? ProjectionState.Slide
-        if (visibleSlide != null) {
+        val visibleSlideIndex = projection.visibleSlideIndex()
+        if (visibleSlideIndex != null) {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(collection.slides[visibleSlide.index].imageUrl)
-                    .size(projectionWidth, projectionHeight)
-                    .precision(Precision.INEXACT)
-                    .crossfade(false)
-                    .build(),
+                model = imageRequest(visibleSlideIndex),
                 contentDescription = null,
                 imageLoader = imageLoader,
                 modifier = Modifier.fillMaxSize(),
@@ -281,11 +300,7 @@ private fun ProjectionScreen(collection: SlideCollection) {
     }
     LaunchedEffect(collection.id) {
         projectionFocus.requestFocus()
-        val initialTransition = projection.beginInitialLoad() ?: return@LaunchedEffect
-        projection = initialTransition
-        sound.play()
-        delay(220)
-        projection = projection.reveal()
+        prepareAndRun(projection.beginInitialLoad() ?: return@LaunchedEffect)
     }
 }
 
