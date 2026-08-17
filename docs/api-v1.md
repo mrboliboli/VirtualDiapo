@@ -71,3 +71,17 @@ curl -X POST http://localhost:8080/api/v1/collections \
 
 La réponse `201 Created` reprend le format détaillé d’une collection. Les images sont servies par
 `GET /api/v1/images/{id}.jpg`.
+
+## Modifier ou supprimer une collection
+
+`PUT /api/v1/collections/{id}` modifie les informations d’une collection sans changer ses images :
+
+```json
+{
+  "title": "Vacances renommées",
+  "description": "Nouvelle description",
+  "year": 2027
+}
+```
+
+`DELETE /api/v1/collections/{id}` supprime la collection, ses diapositives et les fichiers JPEG associés.

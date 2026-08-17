@@ -15,6 +15,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,6 +54,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import fr.virtualdiapo.player.model.SlideCollection
+import fr.virtualdiapo.player.model.CollectionSummary
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.ProjectionState
 import kotlinx.coroutines.delay
@@ -85,10 +90,46 @@ private fun VirtualDiapoApp(viewModel: MainViewModel) {
     when (val current = state) {
         PlayerUiState.Setup -> ConnectionScreen(onConnect = viewModel::connect)
         PlayerUiState.Loading -> LoadingScreen()
+        is PlayerUiState.CollectionSelection -> {
+            BackHandler(onBack = viewModel::returnToSetup)
+            CollectionSelectionScreen(current.collections) { id ->
+                viewModel.selectCollection(current.address, id)
+            }
+        }
         is PlayerUiState.Failure -> ConnectionScreen(current.message, viewModel::connect)
         is PlayerUiState.Ready -> {
-            BackHandler(onBack = viewModel::returnToSetup)
+            BackHandler(onBack = viewModel::returnToCollections)
             ProjectionScreen(current.collection)
+        }
+    }
+}
+
+@Composable
+private fun CollectionSelectionScreen(
+    collections: List<CollectionSummary>,
+    onSelect: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(64.dp),
+    ) {
+        Text("Choisir une collection", style = MaterialTheme.typography.headlineLarge, color = Color(0xFFE8DFC8))
+        Spacer(Modifier.height(24.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(collections, key = { it.id }) { collection ->
+                Button(
+                    onClick = { onSelect(collection.id) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(8.dp)) {
+                        Text(collection.title, style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            listOfNotNull(collection.year?.toString(), "${collection.slideCount} images")
+                                .joinToString(" · "),
+                        )
+                        collection.description?.let { Text(it) }
+                    }
+                }
+            }
         }
     }
 }

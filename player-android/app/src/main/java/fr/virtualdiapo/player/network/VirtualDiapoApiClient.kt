@@ -2,6 +2,7 @@ package fr.virtualdiapo.player.network
 
 import fr.virtualdiapo.player.model.Slide
 import fr.virtualdiapo.player.model.SlideCollection
+import fr.virtualdiapo.player.model.CollectionSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -10,11 +11,25 @@ import java.net.HttpURLConnection
 import java.net.URI
 
 class VirtualDiapoApiClient {
-    suspend fun loadFirstCollection(address: String): SlideCollection = withContext(Dispatchers.IO) {
+    suspend fun loadCollections(address: String): List<CollectionSummary> = withContext(Dispatchers.IO) {
         val baseUrl = normalizeAddress(address)
         val summaries = getJsonArray("$baseUrl/api/v1/collections")
-        check(summaries.length() > 0) { "Le serveur ne contient aucune collection" }
-        val id = summaries.getJSONObject(0).getString("id")
+        buildList {
+            for (index in 0 until summaries.length()) {
+                val item = summaries.getJSONObject(index)
+                add(CollectionSummary(
+                    id = item.getString("id"),
+                    title = item.getString("title"),
+                    description = item.optString("description").takeIf(String::isNotBlank),
+                    year = item.optInt("year").takeIf { item.has("year") && !item.isNull("year") },
+                    slideCount = item.getInt("slideCount"),
+                ))
+            }
+        }
+    }
+
+    suspend fun loadCollection(address: String, id: String): SlideCollection = withContext(Dispatchers.IO) {
+        val baseUrl = normalizeAddress(address)
         parseCollection(getJsonObject("$baseUrl/api/v1/collections/$id"), baseUrl)
     }
 
@@ -75,4 +90,3 @@ class VirtualDiapoApiClient {
         )
     }
 }
-

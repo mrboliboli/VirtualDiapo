@@ -19,6 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -57,6 +59,8 @@ class CollectionControllerTest {
 
         var imagePath = com.jayway.jsonpath.JsonPath.read(
                 result.getResponse().getContentAsString(), "$.slides[0].imagePath").toString();
+        var collectionId = com.jayway.jsonpath.JsonPath.read(
+                result.getResponse().getContentAsString(), "$.id").toString();
 
         mvc.perform(get("/api/v1/collections"))
                 .andExpect(status().isOk())
@@ -68,6 +72,17 @@ class CollectionControllerTest {
                 .andExpect(content().contentTypeCompatibleWith("image/jpeg"))
                 .andExpect(header().exists("Cache-Control"))
                 .andExpect(content().bytes(jpegBytes()));
+
+        mvc.perform(put("/api/v1/collections/{id}", collectionId)
+                        .contentType("application/json")
+                        .content("{\"title\":\"Vacances renommées\",\"description\":\"Nouvelle description\",\"year\":2027}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Vacances renommées"))
+                .andExpect(jsonPath("$.slides.length()").value(1));
+
+        mvc.perform(delete("/api/v1/collections/{id}", collectionId))
+                .andExpect(status().isNoContent());
+        mvc.perform(get(imagePath)).andExpect(status().isNotFound());
     }
 
     @Test

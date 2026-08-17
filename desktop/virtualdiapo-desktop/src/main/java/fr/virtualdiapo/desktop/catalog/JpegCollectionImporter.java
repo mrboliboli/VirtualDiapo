@@ -49,6 +49,10 @@ public final class JpegCollectionImporter {
                 .toList());
     }
 
+    public Path storedImagePath(UUID slideId) {
+        return imageDirectory.resolve(slideId + ".jpg");
+    }
+
     private SlideCollection importSources(String title, String description, Integer year,
                                           List<ImageSource> images) throws IOException {
         if (title == null || title.isBlank()) {

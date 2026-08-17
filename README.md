@@ -53,11 +53,12 @@ JAVA_HOME=$(/usr/libexec/java_home -v 21) mvn -pl virtualdiapo-desktop javafx:ru
 
 La fenêtre démarre également le serveur. Elle permet de :
 
-1. renseigner le titre, la description et l’année ;
+1. créer une collection en renseignant son titre, sa description et son année ;
 2. sélectionner plusieurs JPEG ;
 3. prévisualiser chaque image ;
 4. modifier leur ordre avec « Monter » et « Descendre » ;
-5. créer la collection, immédiatement disponible sur la TV.
+5. sélectionner une collection existante pour modifier ses informations ou la supprimer ;
+6. enregistrer : le résultat est immédiatement disponible sur la TV.
 
 ## Compiler et installer le Player
 
@@ -73,9 +74,10 @@ Dans le Player :
 
 1. conserver `10.0.2.2:8080` dans l’émulateur Android, ou saisir l’adresse du Mac sur une vraie TV ;
 2. choisir « Charger le projecteur » ;
-3. utiliser droite ou validation pour avancer ;
-4. utiliser gauche pour revenir ;
-5. utiliser retour pour quitter la projection.
+3. choisir une collection dans la liste ;
+4. utiliser droite ou validation pour avancer ;
+5. utiliser gauche pour revenir ;
+6. utiliser retour pour revenir à la liste des collections.
 
 Le changement applique 180 ms de noir, joue un claquement mécanique local, puis révèle l’image préchargée. Les diapositives précédente, courante et suivante sont maintenues dans le cache du Player.
 
@@ -85,6 +87,8 @@ Le changement applique 180 ms de noir, joue un claquement mécanique local, puis
 - `GET /api/v1/collections`
 - `GET /api/v1/collections/{id}`
 - `POST /api/v1/collections`
+- `PUT /api/v1/collections/{id}`
+- `DELETE /api/v1/collections/{id}`
 - `GET /api/v1/images/{id}.jpg`
 
 ## Tests

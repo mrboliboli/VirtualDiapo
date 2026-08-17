@@ -4,6 +4,7 @@ import fr.virtualdiapo.core.CollectionCatalog;
 import fr.virtualdiapo.core.SlideCollection;
 import fr.virtualdiapo.desktop.VirtualDiapoApplication;
 import fr.virtualdiapo.desktop.catalog.JpegCollectionImporter;
+import fr.virtualdiapo.desktop.catalog.CollectionManagementService;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -14,6 +15,8 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
@@ -29,6 +32,7 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.stage.Modality;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 
@@ -39,6 +43,8 @@ public final class AdminWindow extends Application {
     private ConfigurableApplicationContext context;
     private CollectionCatalog catalog;
     private JpegCollectionImporter importer;
+    private CollectionManagementService management;
+    private SlideCollection editedCollection;
 
     private final ObservableList<SlideCollection> collections = FXCollections.observableArrayList();
     private final ObservableList<Path> selectedImages = FXCollections.observableArrayList();
@@ -49,12 +55,14 @@ public final class AdminWindow extends Application {
     private final TextArea description = new TextArea();
     private final TextField year = new TextField();
     private final Label status = new Label();
+    private final Button deleteButton = new Button("Supprimer");
 
     @Override
     public void init() {
         context = SpringApplication.run(VirtualDiapoApplication.class);
         catalog = context.getBean(CollectionCatalog.class);
         importer = context.getBean(JpegCollectionImporter.class);
+        management = context.getBean(CollectionManagementService.class);
     }
 
     @Override
@@ -91,6 +99,11 @@ public final class AdminWindow extends Application {
             protected void updateItem(SlideCollection item, boolean empty) {
                 super.updateItem(item, empty);
                 setText(empty || item == null ? null : item.title() + "  ·  " + item.slides().size() + " images");
+            }
+        });
+        collectionList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, selected) -> {
+            if (selected != null) {
+                edit(selected);
             }
         });
         VBox.setVgrow(collectionList, Priority.ALWAYS);
@@ -137,11 +150,15 @@ public final class AdminWindow extends Application {
         remove.setOnAction(event -> removeSelected());
         var imageActions = new HBox(8, choose, up, down, remove);
 
-        var create = new Button("Créer la collection");
+        var create = new Button("Enregistrer");
         create.setDefaultButton(true);
-        create.setOnAction(event -> importCollection(create));
+        create.setOnAction(event -> saveCollection(create));
+        var reset = new Button("Nouvelle");
+        reset.setOnAction(event -> clearForm());
+        deleteButton.setDisable(true);
+        deleteButton.setOnAction(event -> deleteCollection());
         status.setWrapText(true);
-        var footer = new HBox(14, create, status);
+        var footer = new HBox(10, create, reset, deleteButton, status);
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(status, Priority.ALWAYS);
 
@@ -189,7 +206,7 @@ public final class AdminWindow extends Application {
         preview.setImage(path == null ? null : new Image(path.toUri().toString(), true));
     }
 
-    private void importCollection(Button createButton) {
+    private void saveCollection(Button createButton) {
         final Integer parsedYear;
         try {
             parsedYear = year.getText().isBlank() ? null : Integer.valueOf(year.getText().trim());
@@ -201,6 +218,9 @@ public final class AdminWindow extends Application {
         var task = new Task<SlideCollection>() {
             @Override
             protected SlideCollection call() throws Exception {
+                if (editedCollection != null) {
+                    return management.update(editedCollection.id(), title.getText(), description.getText(), parsedYear);
+                }
                 return importer.importFiles(title.getText(), description.getText(), parsedYear, files);
             }
         };
@@ -208,7 +228,7 @@ public final class AdminWindow extends Application {
         status.setText("Import en cours…");
         task.setOnSucceeded(event -> {
             createButton.setDisable(false);
-            status.setText("Collection « " + task.getValue().title() + " » créée.");
+            status.setText("Collection « " + task.getValue().title() + " » enregistrée.");
             clearForm();
             refreshCollections();
         });
@@ -222,11 +242,62 @@ public final class AdminWindow extends Application {
     }
 
     private void clearForm() {
+        editedCollection = null;
+        deleteButton.setDisable(true);
+        collectionList.getSelectionModel().clearSelection();
         title.clear();
         description.clear();
         year.clear();
         selectedImages.clear();
         preview.setImage(null);
+    }
+
+    private void edit(SlideCollection collection) {
+        editedCollection = collection;
+        deleteButton.setDisable(false);
+        title.setText(collection.title());
+        description.setText(collection.description() == null ? "" : collection.description());
+        year.setText(collection.year() == null ? "" : collection.year().toString());
+        selectedImages.setAll(collection.slides().stream()
+                .map(slide -> importer.storedImagePath(slide.id()))
+                .toList());
+        if (selectedImages.isEmpty()) {
+            preview.setImage(null);
+        } else {
+            imageList.getSelectionModel().selectFirst();
+        }
+        status.setText("Modification de « " + collection.title() + " » (" + collection.slides().size() + " images).");
+    }
+
+    private void deleteCollection() {
+        if (editedCollection == null) {
+            status.setText("Sélectionnez d’abord une collection.");
+            return;
+        }
+        var confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                "Supprimer « " + editedCollection.title() + " » et toutes ses images ?",
+                ButtonType.CANCEL, ButtonType.OK);
+        confirmation.setHeaderText("Suppression définitive");
+        confirmation.initOwner(collectionList.getScene().getWindow());
+        confirmation.initModality(Modality.WINDOW_MODAL);
+        if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
+            return;
+        }
+        try {
+            var deletedTitle = editedCollection.title();
+            if (!management.delete(editedCollection.id())) {
+                throw new IllegalStateException("La collection n’existe plus dans la base de données.");
+            }
+            clearForm();
+            refreshCollections();
+            status.setText("Collection « " + deletedTitle + " » supprimée.");
+        } catch (Exception exception) {
+            status.setText(exception.getMessage());
+            var error = new Alert(Alert.AlertType.ERROR, exception.getMessage(), ButtonType.OK);
+            error.setHeaderText("La suppression a échoué");
+            error.initOwner(collectionList.getScene().getWindow());
+            error.showAndWait();
+        }
     }
 
     private void refreshCollections() {

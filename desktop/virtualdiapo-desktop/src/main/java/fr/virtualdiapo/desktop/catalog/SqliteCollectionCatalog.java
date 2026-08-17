@@ -82,6 +82,23 @@ public class SqliteCollectionCatalog implements CollectionCatalog {
         }
     }
 
+    @Override
+    @Transactional
+    public void update(SlideCollection collection) {
+        int changed = jdbc.update("UPDATE collections SET title = ?, description = ?, year = ? WHERE id = ?",
+                collection.title(), collection.description(), collection.year(), collection.id().toString());
+        if (changed == 0) {
+            throw new IllegalArgumentException("Collection introuvable");
+        }
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteById(UUID id) {
+        jdbc.update("DELETE FROM slides WHERE collection_id = ?", id.toString());
+        return jdbc.update("DELETE FROM collections WHERE id = ?", id.toString()) > 0;
+    }
+
     private static final class CollectionBuilder {
         private final UUID id;
         private final String title;

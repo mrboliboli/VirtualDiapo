@@ -1,5 +1,13 @@
 package fr.virtualdiapo.player.model
 
+data class CollectionSummary(
+    val id: String,
+    val title: String,
+    val description: String?,
+    val year: Int?,
+    val slideCount: Int,
+)
+
 data class SlideCollection(
     val id: String,
     val title: String,
@@ -13,4 +21,3 @@ data class Slide(
     val position: Int,
     val imageUrl: String,
 )
-

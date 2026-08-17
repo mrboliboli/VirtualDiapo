@@ -10,4 +10,8 @@ public interface CollectionCatalog {
     Optional<SlideCollection> findById(UUID id);
 
     void save(SlideCollection collection);
+
+    void update(SlideCollection collection);
+
+    boolean deleteById(UUID id);
 }
