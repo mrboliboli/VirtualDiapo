@@ -302,6 +302,9 @@ public final class AdminWindow extends Application {
 
     private void refreshCollections() {
         collections.setAll(catalog.findAll());
+        if (editedCollection == null && !collections.isEmpty()) {
+            collectionList.getSelectionModel().selectFirst();
+        }
     }
 
     @Override
