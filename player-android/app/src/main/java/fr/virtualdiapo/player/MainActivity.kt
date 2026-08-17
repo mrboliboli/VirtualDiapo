@@ -63,6 +63,7 @@ import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.ProjectionState
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.network.DiscoveredServer
+import fr.virtualdiapo.player.network.DiscoveryStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -82,7 +83,8 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val viewModel: MainViewModel = viewModel()
                 val servers by discovery.servers.collectAsState()
-                VirtualDiapoApp(viewModel, servers)
+                val discoveryStatus by discovery.status.collectAsState()
+                VirtualDiapoApp(viewModel, servers, discoveryStatus)
             }
         }
     }
@@ -99,10 +101,18 @@ private fun darkColorScheme() = androidx.compose.material3.darkColorScheme(
 )
 
 @Composable
-private fun VirtualDiapoApp(viewModel: MainViewModel, servers: List<DiscoveredServer>) {
+private fun VirtualDiapoApp(
+    viewModel: MainViewModel,
+    servers: List<DiscoveredServer>,
+    discoveryStatus: DiscoveryStatus,
+) {
     val state by viewModel.state.collectAsState()
     when (val current = state) {
-        PlayerUiState.Setup -> ConnectionScreen(servers = servers, onConnect = viewModel::connect)
+        PlayerUiState.Setup -> ConnectionScreen(
+            servers = servers,
+            discoveryStatus = discoveryStatus,
+            onConnect = viewModel::connect,
+        )
         PlayerUiState.Loading -> LoadingScreen()
         is PlayerUiState.CollectionSelection -> {
             BackHandler(onBack = viewModel::returnToSetup)
@@ -110,7 +120,13 @@ private fun VirtualDiapoApp(viewModel: MainViewModel, servers: List<DiscoveredSe
                 viewModel.selectCollection(current.address, id)
             }
         }
-        is PlayerUiState.Failure -> ConnectionScreen(current.message, servers, viewModel::connect)
+        is PlayerUiState.Failure -> ConnectionScreen(
+            error = current.message,
+            servers = servers,
+            discoveryStatus = discoveryStatus,
+            initialAddress = current.address,
+            onConnect = viewModel::connect,
+        )
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)
             ProjectionScreen(current.collection)
@@ -152,9 +168,11 @@ private fun CollectionSelectionScreen(
 private fun ConnectionScreen(
     error: String? = null,
     servers: List<DiscoveredServer> = emptyList(),
+    discoveryStatus: DiscoveryStatus = DiscoveryStatus.STOPPED,
+    initialAddress: String = "10.0.2.2:8080",
     onConnect: (String) -> Unit,
 ) {
-    var address by remember { mutableStateOf("10.0.2.2:8080") }
+    var address by remember(initialAddress) { mutableStateOf(initialAddress) }
     val buttonFocus = remember { FocusRequester() }
     Column(
         modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(72.dp),
@@ -184,6 +202,11 @@ private fun ConnectionScreen(
                     Text("${server.name} · ${server.address}")
                 }
             }
+        } else if (discoveryStatus == DiscoveryStatus.SEARCHING) {
+            Text("Recherche d’un serveur VirtualDiapo…", modifier = Modifier.padding(top = 24.dp))
+        } else if (discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
+            Text("Découverte automatique indisponible — utilisez l’adresse manuelle.",
+                modifier = Modifier.padding(top = 24.dp))
         }
     }
     LaunchedEffect(Unit) { buttonFocus.requestFocus() }

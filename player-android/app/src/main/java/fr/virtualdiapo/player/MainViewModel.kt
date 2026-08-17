@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import fr.virtualdiapo.player.model.SlideCollection
 import fr.virtualdiapo.player.model.CollectionSummary
 import fr.virtualdiapo.player.network.VirtualDiapoApiClient
+import fr.virtualdiapo.player.network.connectionErrorMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +16,7 @@ sealed interface PlayerUiState {
     data object Loading : PlayerUiState
     data class CollectionSelection(val address: String, val collections: List<CollectionSummary>) : PlayerUiState
     data class Ready(val collection: SlideCollection) : PlayerUiState
-    data class Failure(val message: String) : PlayerUiState
+    data class Failure(val message: String, val address: String) : PlayerUiState
 }
 
 class MainViewModel(
@@ -31,10 +32,10 @@ class MainViewModel(
             _state.value = runCatching { apiClient.loadCollections(address) }
                 .fold(
                     onSuccess = { collections ->
-                        if (collections.isEmpty()) PlayerUiState.Failure("Le serveur ne contient aucune collection")
+                        if (collections.isEmpty()) PlayerUiState.Failure("Le serveur ne contient aucune collection", address)
                         else PlayerUiState.CollectionSelection(address, collections).also { lastSelection = it }
                     },
-                    onFailure = { PlayerUiState.Failure(it.message ?: "Connexion impossible") },
+                    onFailure = { PlayerUiState.Failure(connectionErrorMessage(it), address) },
                 )
         }
     }
@@ -45,7 +46,7 @@ class MainViewModel(
             _state.value = runCatching { apiClient.loadCollection(address, collectionId) }
                 .fold(
                     onSuccess = PlayerUiState::Ready,
-                    onFailure = { PlayerUiState.Failure(it.message ?: "Chargement impossible") },
+                    onFailure = { PlayerUiState.Failure(connectionErrorMessage(it), address) },
                 )
         }
     }

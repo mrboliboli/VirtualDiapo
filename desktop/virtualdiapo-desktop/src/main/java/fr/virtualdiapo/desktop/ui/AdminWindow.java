@@ -20,12 +20,15 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -38,6 +41,8 @@ import org.springframework.context.ConfigurableApplicationContext;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 public final class AdminWindow extends Application {
     private ConfigurableApplicationContext context;
@@ -55,7 +60,16 @@ public final class AdminWindow extends Application {
     private final TextArea description = new TextArea();
     private final TextField year = new TextField();
     private final Label status = new Label();
+    private final Label imageCount = new Label("0 image");
+    private final ProgressIndicator progress = new ProgressIndicator();
+    private final Button saveButton = new Button("Enregistrer");
+    private final Button resetButton = new Button("Nouvelle");
+    private final Button chooseButton = new Button("Ajouter des JPEG…");
+    private final Button upButton = new Button("Monter");
+    private final Button downButton = new Button("Descendre");
+    private final Button removeButton = new Button("Retirer");
     private final Button deleteButton = new Button("Supprimer");
+    private int draggedImageIndex = -1;
 
     @Override
     public void init() {
@@ -130,35 +144,36 @@ public final class AdminWindow extends Application {
         previewBox.setStyle("-fx-background-color: #171512;");
         BorderPane.setAlignment(preview, Pos.CENTER);
 
-        imageList.setCellFactory(ignored -> new ListCell<>() {
-            @Override
-            protected void updateItem(Path item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : (getIndex() + 1) + ".  " + item.getFileName());
-            }
+        imageList.setCellFactory(ignored -> createImageCell());
+        imageList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, path) -> {
+            showPreview(path);
+            updateImageActions();
         });
-        imageList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, path) -> showPreview(path));
+        selectedImages.addListener((javafx.collections.ListChangeListener<Path>) ignored -> {
+            updateImageCount();
+            updateImageActions();
+        });
+        updateImageCount();
+        updateImageActions();
         VBox.setVgrow(imageList, Priority.ALWAYS);
 
-        var choose = new Button("Ajouter des JPEG…");
-        choose.setOnAction(event -> chooseImages(stage));
-        var up = new Button("Monter");
-        up.setOnAction(event -> moveSelected(-1));
-        var down = new Button("Descendre");
-        down.setOnAction(event -> moveSelected(1));
-        var remove = new Button("Retirer");
-        remove.setOnAction(event -> removeSelected());
-        var imageActions = new HBox(8, choose, up, down, remove);
+        chooseButton.setOnAction(event -> chooseImages(stage));
+        upButton.setOnAction(event -> moveSelected(-1));
+        downButton.setOnAction(event -> moveSelected(1));
+        removeButton.setOnAction(event -> removeSelected());
+        var imageActions = new HBox(8, chooseButton, upButton, downButton, removeButton, imageCount);
+        imageActions.setAlignment(Pos.CENTER_LEFT);
 
-        var create = new Button("Enregistrer");
-        create.setDefaultButton(true);
-        create.setOnAction(event -> saveCollection(create));
-        var reset = new Button("Nouvelle");
-        reset.setOnAction(event -> clearForm());
+        saveButton.setDefaultButton(true);
+        saveButton.setOnAction(event -> saveCollection());
+        resetButton.setOnAction(event -> clearForm());
         deleteButton.setDisable(true);
         deleteButton.setOnAction(event -> deleteCollection());
         status.setWrapText(true);
-        var footer = new HBox(10, create, reset, deleteButton, status);
+        progress.setMaxSize(22, 22);
+        progress.setVisible(false);
+        progress.setManaged(false);
+        var footer = new HBox(10, saveButton, resetButton, deleteButton, progress, status);
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(status, Priority.ALWAYS);
 
@@ -169,14 +184,60 @@ public final class AdminWindow extends Application {
         return pane;
     }
 
+    private ListCell<Path> createImageCell() {
+        var cell = new ListCell<Path>() {
+            @Override
+            protected void updateItem(Path item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : (getIndex() + 1) + ".  " + item.getFileName());
+            }
+        };
+        cell.setOnDragDetected(event -> {
+            if (!cell.isEmpty()) {
+                draggedImageIndex = cell.getIndex();
+                var content = new ClipboardContent();
+                content.putString(Integer.toString(draggedImageIndex));
+                cell.startDragAndDrop(TransferMode.MOVE).setContent(content);
+                event.consume();
+            }
+        });
+        cell.setOnDragOver(event -> {
+            if (draggedImageIndex >= 0 && draggedImageIndex != cell.getIndex()) {
+                event.acceptTransferModes(TransferMode.MOVE);
+                event.consume();
+            }
+        });
+        cell.setOnDragDropped(event -> {
+            int target = cell.isEmpty() ? selectedImages.size() - 1 : cell.getIndex();
+            if (draggedImageIndex >= 0 && target >= 0 && target < selectedImages.size()) {
+                var image = selectedImages.remove(draggedImageIndex);
+                selectedImages.add(target, image);
+                imageList.getSelectionModel().select(target);
+                event.setDropCompleted(true);
+            }
+            draggedImageIndex = -1;
+            event.consume();
+        });
+        cell.setOnDragDone(event -> draggedImageIndex = -1);
+        return cell;
+    }
+
     private void chooseImages(Stage stage) {
         var chooser = new FileChooser();
         chooser.setTitle("Choisir les diapositives JPEG");
         chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Images JPEG", "*.jpg", "*.jpeg", "*.JPG", "*.JPEG"));
         var files = chooser.showOpenMultipleDialog(stage);
-        if (files != null) {
-            selectedImages.addAll(files.stream().map(java.io.File::toPath).toList());
-            imageList.getSelectionModel().select(selectedImages.size() - files.size());
+        if (files != null && !files.isEmpty()) {
+            var additions = files.stream().map(java.io.File::toPath)
+                    .map(path -> path.toAbsolutePath().normalize())
+                    .filter(path -> selectedImages.stream().noneMatch(existing -> existing.equals(path)))
+                    .toList();
+            selectedImages.addAll(additions);
+            if (!additions.isEmpty()) {
+                imageList.getSelectionModel().select(selectedImages.size() - additions.size());
+            } else {
+                status.setText("Ces images sont déjà présentes dans la collection.");
+            }
         }
     }
 
@@ -206,40 +267,104 @@ public final class AdminWindow extends Application {
         preview.setImage(path == null ? null : new Image(path.toUri().toString(), true));
     }
 
-    private void saveCollection(Button createButton) {
+    private void saveCollection() {
         final Integer parsedYear;
         try {
             parsedYear = year.getText().isBlank() ? null : Integer.valueOf(year.getText().trim());
         } catch (NumberFormatException exception) {
             status.setText("L’année doit être un nombre.");
+            year.requestFocus();
+            return;
+        }
+        if (title.getText().isBlank()) {
+            status.setText("Le titre est obligatoire.");
+            title.requestFocus();
+            return;
+        }
+        if (selectedImages.isEmpty()) {
+            status.setText("Sélectionnez au moins une image JPEG.");
             return;
         }
         var files = List.copyOf(selectedImages);
+        var savedTitle = title.getText();
+        var savedDescription = description.getText();
+        var editedId = editedCollection == null ? null : editedCollection.id();
         var task = new Task<SlideCollection>() {
             @Override
             protected SlideCollection call() throws Exception {
-                if (editedCollection != null) {
+                if (editedId != null) {
                     return importer.updateFiles(
-                            editedCollection.id(), title.getText(), description.getText(), parsedYear, files);
+                            editedId, savedTitle, savedDescription, parsedYear, files);
                 }
-                return importer.importFiles(title.getText(), description.getText(), parsedYear, files);
+                return importer.importFiles(savedTitle, savedDescription, parsedYear, files);
             }
         };
-        createButton.setDisable(true);
-        status.setText("Import en cours…");
+        setBusy(true);
+        status.setText(editedId == null ? "Création de la collection…" : "Enregistrement des modifications…");
         task.setOnSucceeded(event -> {
-            createButton.setDisable(false);
-            status.setText("Collection « " + task.getValue().title() + " » enregistrée.");
-            clearForm();
-            refreshCollections();
+            setBusy(false);
+            var saved = task.getValue();
+            refreshCollections(saved.id());
+            status.setText("Collection « " + saved.title() + " » enregistrée.");
         });
         task.setOnFailed(event -> {
-            createButton.setDisable(false);
-            status.setText(task.getException().getMessage());
+            setBusy(false);
+            showOperationError("L’enregistrement a échoué", task.getException());
         });
         var thread = new Thread(task, "virtualdiapo-import");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    private void setBusy(boolean busy) {
+        collectionList.setDisable(busy);
+        title.setDisable(busy);
+        description.setDisable(busy);
+        year.setDisable(busy);
+        imageList.setDisable(busy);
+        saveButton.setDisable(busy);
+        resetButton.setDisable(busy);
+        chooseButton.setDisable(busy);
+        progress.setVisible(busy);
+        progress.setManaged(busy);
+        if (busy) {
+            upButton.setDisable(true);
+            downButton.setDisable(true);
+            removeButton.setDisable(true);
+            deleteButton.setDisable(true);
+        } else {
+            deleteButton.setDisable(editedCollection == null);
+            updateImageActions();
+        }
+    }
+
+    private void updateImageCount() {
+        imageCount.setText(selectedImages.size() + (selectedImages.size() > 1 ? " images" : " image"));
+    }
+
+    private void updateImageActions() {
+        int index = imageList.getSelectionModel().getSelectedIndex();
+        upButton.setDisable(index <= 0);
+        downButton.setDisable(index < 0 || index >= selectedImages.size() - 1);
+        removeButton.setDisable(index < 0);
+    }
+
+    private void showOperationError(String header, Throwable failure) {
+        var message = errorMessage(failure);
+        status.setText(message);
+        var error = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
+        error.setHeaderText(header);
+        error.initOwner(collectionList.getScene().getWindow());
+        error.initModality(Modality.WINDOW_MODAL);
+        error.showAndWait();
+    }
+
+    private static String errorMessage(Throwable failure) {
+        var current = failure;
+        while (current != null && (current.getMessage() == null || current.getMessage().isBlank())) {
+            current = current.getCause();
+        }
+        return current == null ? "Une erreur inattendue s’est produite." : current.getMessage();
     }
 
     private void clearForm() {
@@ -293,17 +418,22 @@ public final class AdminWindow extends Application {
             refreshCollections();
             status.setText("Collection « " + deletedTitle + " » supprimée.");
         } catch (Exception exception) {
-            status.setText(exception.getMessage());
-            var error = new Alert(Alert.AlertType.ERROR, exception.getMessage(), ButtonType.OK);
-            error.setHeaderText("La suppression a échoué");
-            error.initOwner(collectionList.getScene().getWindow());
-            error.showAndWait();
+            showOperationError("La suppression a échoué", exception);
         }
     }
 
     private void refreshCollections() {
+        refreshCollections(null);
+    }
+
+    private void refreshCollections(UUID collectionToSelect) {
         collections.setAll(catalog.findAll());
-        if (editedCollection == null && !collections.isEmpty()) {
+        if (collectionToSelect != null) {
+            collections.stream()
+                    .filter(collection -> Objects.equals(collection.id(), collectionToSelect))
+                    .findFirst()
+                    .ifPresent(collectionList.getSelectionModel()::select);
+        } else if (editedCollection == null && !collections.isEmpty()) {
             collectionList.getSelectionModel().selectFirst();
         }
     }
