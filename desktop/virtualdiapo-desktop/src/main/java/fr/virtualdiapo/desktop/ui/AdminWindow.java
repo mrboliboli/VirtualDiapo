@@ -15,24 +15,23 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.Separator;
-import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.TransferMode;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
@@ -54,23 +53,33 @@ public final class AdminWindow extends Application {
 
     private final ObservableList<SlideCollection> collections = FXCollections.observableArrayList();
     private final ObservableList<Path> selectedImages = FXCollections.observableArrayList();
-    private final ListView<SlideCollection> collectionList = new ListView<>(collections);
-    private final ListView<Path> imageList = new ListView<>(selectedImages);
+    private CollectionGridView collectionGrid;
+    private SlideGridView imageGrid;
+    private VBox catalogView;
+    private VBox editorView;
+    private VBox metadataForm;
+    private Button editInfoButton;
+    private Button backButton;
     private final ImageView preview = new ImageView();
     private final TextField title = new TextField();
     private final TextArea description = new TextArea();
     private final TextField year = new TextField();
     private final Label status = new Label();
-    private final Label imageCount = new Label("0 image");
+    private final Label previewFilename = new Label("Sélectionnez une diapositive");
+    private final Label previewPosition = new Label();
+    private final Label editorHeading = new Label("Nouveau carrousel");
+    private final Label editorMetadata = new Label("Préparez une nouvelle collection de diapositives");
     private final ProgressIndicator progress = new ProgressIndicator();
     private final Button saveButton = new Button("Enregistrer");
+    private final Button newButton = new Button("+  Nouveau carrousel");
     private final Button resetButton = new Button("Nouvelle");
     private final Button chooseButton = new Button("Ajouter des JPEG…");
     private final Button upButton = new Button("Monter");
     private final Button downButton = new Button("Descendre");
     private final Button removeButton = new Button("Retirer");
     private final Button deleteButton = new Button("Supprimer");
-    private int draggedImageIndex = -1;
+    private boolean returnToCatalogAfterSave;
+    private boolean busy;
 
     @Override
     public void init() {
@@ -85,144 +94,297 @@ public final class AdminWindow extends Application {
         stage.setTitle("VirtualDiapo — Collections");
         stage.setMinWidth(980);
         stage.setMinHeight(650);
-        stage.setScene(new Scene(buildRoot(stage), 1180, 760));
+        var scene = new Scene(buildRoot(stage), 1180, 760);
+        scene.getStylesheets().add(Objects.requireNonNull(
+                getClass().getResource("/virtualdiapo.css")).toExternalForm());
+        stage.setScene(scene);
         stage.show();
         refreshCollections();
     }
 
     private BorderPane buildRoot(Stage stage) {
         var root = new BorderPane();
-        root.setTop(buildHeader());
-        root.setCenter(new SplitPane(buildCatalogPane(), buildImportPane(stage)));
+        root.getStyleClass().add("app-root");
+        root.setLeft(buildSidebar());
+        catalogView = buildCatalogPane();
+        editorView = buildImportPane(stage);
+        var workspace = new StackPane(catalogView, editorView);
+        workspace.getStyleClass().add("workspace");
+        workspace.widthProperty().addListener((ignored, oldWidth, width) ->
+                workspace.setPadding(new Insets(width.doubleValue() < 900 ? 16 : 22)));
+        root.setCenter(workspace);
+        showCatalog();
         return root;
     }
 
-    private VBox buildHeader() {
-        var heading = new Label("VIRTUALDIAPO");
-        heading.setStyle("-fx-font-size: 25px; -fx-font-weight: bold;");
-        var subtitle = new Label("Le serveur est actif sur le port 8080");
-        var box = new VBox(3, heading, subtitle);
-        box.setPadding(new Insets(18, 24, 14, 24));
-        return box;
+    private VBox buildSidebar() {
+        var logo = new ImageView(new Image(Objects.requireNonNull(
+                getClass().getResourceAsStream("/virtualdiapo-logo-horizontal-light.svg.png"))));
+        logo.setFitWidth(132);
+        logo.setFitHeight(36);
+        logo.setPreserveRatio(true);
+        logo.setSmooth(true);
+
+        var navigation = new Label("Carrousels");
+        navigation.getStyleClass().add("navigation-item-active");
+        navigation.setMaxWidth(Double.MAX_VALUE);
+
+        var spacer = new Region();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+        var serverDot = new Label("●");
+        serverDot.getStyleClass().add("server-dot");
+        var serverStatus = new Label("Serveur actif");
+        serverStatus.getStyleClass().add("server-status");
+        var statusLine = new HBox(7, serverDot, serverStatus);
+        statusLine.setAlignment(Pos.CENTER_LEFT);
+        var serverName = new Label("VirtualDiapo");
+        var serverAddress = new Label("localhost:8080");
+        serverName.getStyleClass().add("sidebar-detail");
+        serverAddress.getStyleClass().add("sidebar-detail");
+
+        var sidebar = new VBox(28, logo, navigation, spacer, statusLine, serverName, serverAddress);
+        sidebar.getStyleClass().add("sidebar");
+        sidebar.setPrefWidth(166);
+        sidebar.setMinWidth(150);
+        return sidebar;
     }
 
     private VBox buildCatalogPane() {
-        var heading = new Label("Collections disponibles");
-        heading.setStyle("-fx-font-size: 17px; -fx-font-weight: bold;");
-        collectionList.setCellFactory(ignored -> new ListCell<>() {
-            @Override
-            protected void updateItem(SlideCollection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : item.title() + "  ·  " + item.slides().size() + " images");
-            }
+        var heading = new Label("Mes carrousels");
+        heading.getStyleClass().add("section-heading");
+        var subtitle = new Label("Organisez vos collections de diapositives");
+        subtitle.getStyleClass().add("section-subtitle");
+        var titles = new VBox(2, heading, subtitle);
+        newButton.getStyleClass().add("primary-button");
+        newButton.setOnAction(event -> {
+            clearForm();
+            showEditor(true);
         });
-        collectionList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, selected) -> {
-            if (selected != null) {
-                edit(selected);
-            }
+        var headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        var header = new HBox(16, titles, headerSpacer, newButton);
+        header.setAlignment(Pos.CENTER_LEFT);
+        collectionGrid = new CollectionGridView(collections, collection ->
+                importer.storedImagePath(collection.slides().getFirst().id()));
+        collectionGrid.setOnSelection(collection -> {
+            edit(collection);
+            showEditor(false);
         });
-        VBox.setVgrow(collectionList, Priority.ALWAYS);
-        var pane = new VBox(12, heading, collectionList);
-        pane.setPadding(new Insets(18));
-        pane.setMinWidth(300);
+        VBox.setVgrow(collectionGrid, Priority.ALWAYS);
+        var pane = new VBox(16, header, collectionGrid);
+        pane.getStyleClass().addAll("surface-card", "catalog-view");
         return pane;
     }
 
     private VBox buildImportPane(Stage stage) {
-        var heading = new Label("Nouvelle collection");
-        heading.setStyle("-fx-font-size: 17px; -fx-font-weight: bold;");
+        editorHeading.getStyleClass().add("section-heading");
+        editorMetadata.getStyleClass().add("section-subtitle");
+        var editorTitles = new VBox(2, editorHeading, editorMetadata);
+        backButton = new Button("←  Mes carrousels");
+        backButton.getStyleClass().add("back-button");
+        backButton.setOnAction(event -> requestCatalogReturn());
+        editInfoButton = new Button("Modifier les informations");
+        editInfoButton.getStyleClass().add("secondary-button");
+        var headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        var editorHeader = new HBox(14, backButton, editorTitles, headerSpacer, editInfoButton);
+        editorHeader.setAlignment(Pos.CENTER_LEFT);
         title.setPromptText("Titre");
         title.setTextFormatter(new TextFormatter<String>(change ->
                 change.getControlNewText().length() <= SlideCollection.MAX_TITLE_LENGTH ? change : null));
         description.setPromptText("Description (facultative)");
         description.setPrefRowCount(2);
         year.setPromptText("Année (facultative)");
+        year.textProperty().addListener((ignored, oldValue, value) -> updateEditorMetadata());
 
-        preview.setFitWidth(320);
-        preview.setFitHeight(210);
+        var titleField = labelledField("Titre", title);
+        var yearField = labelledField("Année", year);
+        yearField.setPrefWidth(130);
+        var firstRow = new HBox(12, titleField, yearField);
+        HBox.setHgrow(titleField, Priority.ALWAYS);
+        var descriptionField = labelledField("Description", description);
+        metadataForm = new VBox(12, firstRow, descriptionField);
+        metadataForm.getStyleClass().add("metadata-form");
+        metadataForm.setVisible(false);
+        metadataForm.setManaged(false);
+        editInfoButton.setOnAction(event -> {
+            var visible = !metadataForm.isVisible();
+            metadataForm.setVisible(visible);
+            metadataForm.setManaged(visible);
+            editInfoButton.setText(visible ? "Masquer les informations" : "Modifier les informations");
+        });
+
+        preview.setFitWidth(236);
+        preview.setFitHeight(190);
         preview.setPreserveRatio(true);
         preview.setSmooth(true);
         var previewBox = new BorderPane(preview);
-        previewBox.setMinHeight(220);
-        previewBox.setStyle("-fx-background-color: #171512;");
+        previewBox.setMinSize(220, 170);
+        previewBox.setPrefSize(260, 210);
+        previewBox.setMaxSize(320, 260);
+        previewBox.getStyleClass().add("preview-box");
         BorderPane.setAlignment(preview, Pos.CENTER);
+        previewFilename.getStyleClass().add("preview-filename");
+        previewPosition.getStyleClass().add("preview-metadata");
+        var inspector = new VBox(10, previewBox, previewFilename, previewPosition);
+        inspector.getStyleClass().add("inspector-pane");
+        inspector.setMinWidth(220);
+        inspector.setPrefWidth(260);
+        inspector.setMaxWidth(340);
+        inspector.widthProperty().addListener((ignored, oldWidth, width) ->
+                preview.setFitWidth(Math.max(196, width.doubleValue() - 24)));
 
-        imageList.setCellFactory(ignored -> createImageCell());
-        imageList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, path) -> {
+        var normalMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount.svg.png")));
+        var selectedMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount-selected.svg.png")));
+        imageGrid = new SlideGridView(selectedImages, normalMount, selectedMount);
+        imageGrid.setOnSelection(index -> {
+            var path = index >= 0 && index < selectedImages.size() ? selectedImages.get(index) : null;
             showPreview(path);
+            previewFilename.setText(path == null ? "Sélectionnez une diapositive" : path.getFileName().toString());
+            previewPosition.setText(path == null ? "" : "Diapositive " + (index + 1) + " sur " + selectedImages.size());
             updateImageActions();
         });
         selectedImages.addListener((javafx.collections.ListChangeListener<Path>) ignored -> {
-            updateImageCount();
+            updateEditorMetadata();
             updateImageActions();
         });
-        updateImageCount();
+        updateEditorMetadata();
         updateImageActions();
-        VBox.setVgrow(imageList, Priority.ALWAYS);
+        VBox.setVgrow(imageGrid, Priority.ALWAYS);
 
         chooseButton.setOnAction(event -> chooseImages(stage));
         upButton.setOnAction(event -> moveSelected(-1));
         downButton.setOnAction(event -> moveSelected(1));
         removeButton.setOnAction(event -> removeSelected());
-        var imageActions = new HBox(8, chooseButton, upButton, downButton, removeButton, imageCount);
+        chooseButton.getStyleClass().add("add-button");
+        upButton.getStyleClass().add("secondary-button");
+        downButton.getStyleClass().add("secondary-button");
+        removeButton.getStyleClass().add("danger-button");
+        var imageActions = new HBox(8, chooseButton, removeButton, upButton, downButton);
         imageActions.setAlignment(Pos.CENTER_LEFT);
 
         saveButton.setDefaultButton(true);
+        saveButton.getStyleClass().add("primary-button");
         saveButton.setOnAction(event -> saveCollection());
-        resetButton.setOnAction(event -> clearForm());
+        resetButton.setOnAction(event -> {
+            if (editedCollection == null) clearForm();
+            else edit(editedCollection);
+        });
+        resetButton.setText("Annuler les modifications");
+        resetButton.getStyleClass().add("secondary-button");
         deleteButton.setDisable(true);
         deleteButton.setOnAction(event -> deleteCollection());
+        deleteButton.getStyleClass().add("danger-button");
         status.setWrapText(true);
+        status.getStyleClass().add("operation-status");
         progress.setMaxSize(22, 22);
         progress.setVisible(false);
         progress.setManaged(false);
-        var footer = new HBox(10, saveButton, resetButton, deleteButton, progress, status);
+        var footerSpacer = new Region();
+        HBox.setHgrow(footerSpacer, Priority.ALWAYS);
+        var footer = new HBox(10, deleteButton, status, progress, footerSpacer, resetButton, saveButton);
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(status, Priority.ALWAYS);
 
-        var pane = new VBox(10, heading, title, description, year, new Separator(Orientation.HORIZONTAL),
-                imageActions, imageList, previewBox, footer);
-        pane.setPadding(new Insets(18));
-        pane.setMinWidth(590);
+        var listPane = new VBox(12, imageGrid, imageActions);
+        HBox.setHgrow(listPane, Priority.ALWAYS);
+        VBox.setVgrow(imageGrid, Priority.ALWAYS);
+        var mediaPane = new HBox(18, listPane, inspector);
+        HBox.setHgrow(listPane, Priority.ALWAYS);
+        VBox.setVgrow(mediaPane, Priority.ALWAYS);
+        var pane = new VBox(14, editorHeader, metadataForm,
+                new Separator(Orientation.HORIZONTAL), mediaPane, footer);
+        pane.getStyleClass().addAll("surface-card", "editor-view");
+        pane.widthProperty().addListener((ignored, oldWidth, width) -> {
+            var inspectorWidth = Math.max(220, Math.min(320, width.doubleValue() * 0.25));
+            inspector.setPrefWidth(inspectorWidth);
+            previewBox.setPrefWidth(inspectorWidth - 24);
+        });
+        pane.heightProperty().addListener((ignored, oldHeight, height) -> {
+            var previewHeight = Math.max(170, Math.min(260, height.doubleValue() * 0.34));
+            previewBox.setPrefHeight(previewHeight);
+            preview.setFitHeight(previewHeight - 20);
+        });
+        pane.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ESCAPE) {
+                requestCatalogReturn();
+                event.consume();
+            }
+        });
         return pane;
     }
 
-    private ListCell<Path> createImageCell() {
-        var cell = new ListCell<Path>() {
-            @Override
-            protected void updateItem(Path item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : (getIndex() + 1) + ".  " + item.getFileName());
-            }
-        };
-        cell.setOnDragDetected(event -> {
-            if (!cell.isEmpty()) {
-                draggedImageIndex = cell.getIndex();
-                var content = new ClipboardContent();
-                content.putString(Integer.toString(draggedImageIndex));
-                cell.startDragAndDrop(TransferMode.MOVE).setContent(content);
-                event.consume();
-            }
-        });
-        cell.setOnDragOver(event -> {
-            if (draggedImageIndex >= 0 && draggedImageIndex != cell.getIndex()) {
-                event.acceptTransferModes(TransferMode.MOVE);
-                event.consume();
-            }
-        });
-        cell.setOnDragDropped(event -> {
-            int target = cell.isEmpty() ? selectedImages.size() - 1 : cell.getIndex();
-            if (draggedImageIndex >= 0 && target >= 0 && target < selectedImages.size()) {
-                var image = selectedImages.remove(draggedImageIndex);
-                selectedImages.add(target, image);
-                imageList.getSelectionModel().select(target);
-                event.setDropCompleted(true);
-            }
-            draggedImageIndex = -1;
-            event.consume();
-        });
-        cell.setOnDragDone(event -> draggedImageIndex = -1);
-        return cell;
+    private void showCatalog() {
+        if (catalogView == null || editorView == null) return;
+        catalogView.setVisible(true);
+        catalogView.setManaged(true);
+        editorView.setVisible(false);
+        editorView.setManaged(false);
+    }
+
+    private void requestCatalogReturn() {
+        if (busy) return;
+        if (!hasUnsavedChanges()) {
+            showCatalog();
+            return;
+        }
+        var save = new ButtonType("Enregistrer", ButtonBar.ButtonData.YES);
+        var discard = new ButtonType("Ignorer", ButtonBar.ButtonData.NO);
+        var confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                "Des modifications n’ont pas encore été enregistrées.",
+                save, discard, ButtonType.CANCEL);
+        confirmation.setHeaderText("Revenir à mes carrousels ?");
+        confirmation.initOwner(status.getScene().getWindow());
+        confirmation.initModality(Modality.WINDOW_MODAL);
+        var choice = confirmation.showAndWait().orElse(ButtonType.CANCEL);
+        if (choice == save) {
+            returnToCatalogAfterSave = true;
+            saveCollection();
+        } else if (choice == discard) {
+            returnToCatalogAfterSave = false;
+            showCatalog();
+        }
+    }
+
+    private boolean hasUnsavedChanges() {
+        if (editedCollection == null) {
+            return !title.getText().isBlank() || !description.getText().isBlank()
+                    || !year.getText().isBlank() || !selectedImages.isEmpty();
+        }
+        var savedDescription = editedCollection.description() == null ? "" : editedCollection.description();
+        var savedYear = editedCollection.year() == null ? "" : editedCollection.year().toString();
+        var savedImages = editedCollection.slides().stream()
+                .map(slide -> importer.storedImagePath(slide.id()))
+                .toList();
+        return !Objects.equals(title.getText(), editedCollection.title())
+                || !Objects.equals(description.getText(), savedDescription)
+                || !Objects.equals(year.getText().trim(), savedYear)
+                || !selectedImages.equals(savedImages);
+    }
+
+    private void showInformationForm() {
+        metadataForm.setVisible(true);
+        metadataForm.setManaged(true);
+        editInfoButton.setText("Masquer les informations");
+    }
+
+    private void showEditor(boolean showInformationForm) {
+        catalogView.setVisible(false);
+        catalogView.setManaged(false);
+        editorView.setVisible(true);
+        editorView.setManaged(true);
+        metadataForm.setVisible(showInformationForm);
+        metadataForm.setManaged(showInformationForm);
+        editInfoButton.setText(showInformationForm ? "Masquer les informations" : "Modifier les informations");
+    }
+
+    private VBox labelledField(String labelText, javafx.scene.Node field) {
+        var label = new Label(labelText);
+        label.getStyleClass().add("field-label");
+        label.setLabelFor(field);
+        var box = new VBox(6, label, field);
+        VBox.setVgrow(field, Priority.ALWAYS);
+        return box;
     }
 
     private void chooseImages(Stage stage) {
@@ -237,7 +399,7 @@ public final class AdminWindow extends Application {
                     .toList();
             selectedImages.addAll(additions);
             if (!additions.isEmpty()) {
-                imageList.getSelectionModel().select(selectedImages.size() - additions.size());
+                imageGrid.select(selectedImages.size() - additions.size());
             } else {
                 status.setText("Ces images sont déjà présentes dans la collection.");
             }
@@ -245,23 +407,25 @@ public final class AdminWindow extends Application {
     }
 
     private void moveSelected(int offset) {
-        int from = imageList.getSelectionModel().getSelectedIndex();
+        int from = imageGrid.getSelectedIndex();
         int to = from + offset;
         if (from >= 0 && to >= 0 && to < selectedImages.size()) {
             var image = selectedImages.remove(from);
             selectedImages.add(to, image);
-            imageList.getSelectionModel().select(to);
+            imageGrid.select(to);
         }
     }
 
     private void removeSelected() {
-        int index = imageList.getSelectionModel().getSelectedIndex();
+        int index = imageGrid.getSelectedIndex();
         if (index >= 0) {
             selectedImages.remove(index);
             if (!selectedImages.isEmpty()) {
-                imageList.getSelectionModel().select(Math.min(index, selectedImages.size() - 1));
+                imageGrid.select(Math.min(index, selectedImages.size() - 1));
             } else {
                 preview.setImage(null);
+                previewFilename.setText("Sélectionnez une diapositive");
+                previewPosition.setText("");
             }
         }
     }
@@ -271,16 +435,19 @@ public final class AdminWindow extends Application {
     }
 
     private void saveCollection() {
+        if (busy) return;
         final Integer parsedYear;
         try {
             parsedYear = year.getText().isBlank() ? null : Integer.valueOf(year.getText().trim());
         } catch (NumberFormatException exception) {
             status.setText("L’année doit être un nombre.");
+            showInformationForm();
             year.requestFocus();
             return;
         }
         if (title.getText().isBlank()) {
             status.setText("Le titre est obligatoire.");
+            showInformationForm();
             title.requestFocus();
             return;
         }
@@ -309,9 +476,12 @@ public final class AdminWindow extends Application {
             var saved = task.getValue();
             refreshCollections(saved.id());
             status.setText("Collection « " + saved.title() + " » enregistrée.");
+            if (returnToCatalogAfterSave) showCatalog();
+            returnToCatalogAfterSave = false;
         });
         task.setOnFailed(event -> {
             setBusy(false);
+            returnToCatalogAfterSave = false;
             showOperationError("L’enregistrement a échoué", task.getException());
         });
         var thread = new Thread(task, "virtualdiapo-import");
@@ -320,14 +490,18 @@ public final class AdminWindow extends Application {
     }
 
     private void setBusy(boolean busy) {
-        collectionList.setDisable(busy);
+        this.busy = busy;
+        collectionGrid.setDisable(busy);
         title.setDisable(busy);
         description.setDisable(busy);
         year.setDisable(busy);
-        imageList.setDisable(busy);
+        imageGrid.setDisable(busy);
         saveButton.setDisable(busy);
         resetButton.setDisable(busy);
         chooseButton.setDisable(busy);
+        newButton.setDisable(busy);
+        backButton.setDisable(busy);
+        editInfoButton.setDisable(busy);
         progress.setVisible(busy);
         progress.setManaged(busy);
         if (busy) {
@@ -341,12 +515,14 @@ public final class AdminWindow extends Application {
         }
     }
 
-    private void updateImageCount() {
-        imageCount.setText(selectedImages.size() + (selectedImages.size() > 1 ? " images" : " image"));
+    private void updateEditorMetadata() {
+        var count = selectedImages.size();
+        var yearSuffix = year.getText().isBlank() ? "" : "  ·  " + year.getText().trim();
+        editorMetadata.setText(count + (count > 1 ? " diapositives" : " diapositive") + yearSuffix);
     }
 
     private void updateImageActions() {
-        int index = imageList.getSelectionModel().getSelectedIndex();
+        int index = imageGrid.getSelectedIndex();
         upButton.setDisable(index <= 0);
         downButton.setDisable(index < 0 || index >= selectedImages.size() - 1);
         removeButton.setDisable(index < 0);
@@ -357,7 +533,7 @@ public final class AdminWindow extends Application {
         status.setText(message);
         var error = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
         error.setHeaderText(header);
-        error.initOwner(collectionList.getScene().getWindow());
+        error.initOwner(status.getScene().getWindow());
         error.initModality(Modality.WINDOW_MODAL);
         error.showAndWait();
     }
@@ -372,17 +548,25 @@ public final class AdminWindow extends Application {
 
     private void clearForm() {
         editedCollection = null;
+        editorHeading.setText("Nouveau carrousel");
+        editorMetadata.setText("Préparez une nouvelle collection de diapositives");
         deleteButton.setDisable(true);
-        collectionList.getSelectionModel().clearSelection();
+        collectionGrid.select(null);
         title.clear();
         description.clear();
         year.clear();
         selectedImages.clear();
         preview.setImage(null);
+        previewFilename.setText("Sélectionnez une diapositive");
+        previewPosition.setText("");
     }
 
     private void edit(SlideCollection collection) {
         editedCollection = collection;
+        editorHeading.setText(collection.title());
+        editorMetadata.setText(collection.slides().size()
+                + (collection.slides().size() > 1 ? " diapositives" : " diapositive")
+                + (collection.year() == null ? "" : "  ·  " + collection.year()));
         deleteButton.setDisable(false);
         title.setText(collection.title());
         description.setText(collection.description() == null ? "" : collection.description());
@@ -392,8 +576,10 @@ public final class AdminWindow extends Application {
                 .toList());
         if (selectedImages.isEmpty()) {
             preview.setImage(null);
+            previewFilename.setText("Sélectionnez une diapositive");
+            previewPosition.setText("");
         } else {
-            imageList.getSelectionModel().selectFirst();
+            imageGrid.select(0);
         }
         status.setText("Modification de « " + collection.title() + " » (" + collection.slides().size() + " images).");
     }
@@ -407,7 +593,7 @@ public final class AdminWindow extends Application {
                 "Supprimer « " + editedCollection.title() + " » et toutes ses images ?",
                 ButtonType.CANCEL, ButtonType.OK);
         confirmation.setHeaderText("Suppression définitive");
-        confirmation.initOwner(collectionList.getScene().getWindow());
+        confirmation.initOwner(status.getScene().getWindow());
         confirmation.initModality(Modality.WINDOW_MODAL);
         if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
             return;
@@ -419,6 +605,7 @@ public final class AdminWindow extends Application {
             }
             clearForm();
             refreshCollections();
+            showCatalog();
             status.setText("Collection « " + deletedTitle + " » supprimée.");
         } catch (Exception exception) {
             showOperationError("La suppression a échoué", exception);
@@ -435,9 +622,13 @@ public final class AdminWindow extends Application {
             collections.stream()
                     .filter(collection -> Objects.equals(collection.id(), collectionToSelect))
                     .findFirst()
-                    .ifPresent(collectionList.getSelectionModel()::select);
+                    .ifPresent(collection -> {
+                        collectionGrid.select(collection);
+                        edit(collection);
+                    });
         } else if (editedCollection == null && !collections.isEmpty()) {
-            collectionList.getSelectionModel().selectFirst();
+            collectionGrid.select(collections.getFirst());
+            edit(collections.getFirst());
         }
     }
 
