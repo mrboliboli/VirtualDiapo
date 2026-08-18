@@ -158,56 +158,93 @@
 
 .button:disabled { -fx-opacity: 0.48; }
 
-.collection-list,
-.list-view {
+.collection-grid-scroll,
+.slide-grid-scroll {
     -fx-background-color: transparent;
+    -fx-background: transparent;
     -fx-border-color: transparent;
     -fx-padding: 0;
 }
 
-.collection-list .list-cell {
+.collection-grid-scroll > .viewport,
+.slide-grid-scroll > .viewport,
+.collection-grid,
+.slide-grid {
+    -fx-background-color: transparent;
+}
+
+.collection-card {
     -fx-background-color: #faf9f7;
     -fx-background-radius: 7px;
     -fx-border-color: transparent;
     -fx-border-radius: 7px;
-    -fx-padding: 10px;
-    -fx-pref-height: 82px;
+    -fx-padding: 8px;
+    -fx-alignment: top-left;
+    -fx-effect: dropshadow(gaussian, rgba(20, 16, 12, 0.08), 5, 0, 0, 1);
 }
 
-.collection-list .list-cell:empty { -fx-background-color: transparent; }
+.collection-card:hover {
+    -fx-background-color: white;
+    -fx-effect: dropshadow(gaussian, rgba(20, 16, 12, 0.15), 8, 0, 0, 2);
+}
 
-.collection-list .list-cell:selected {
+.collection-card:selected {
     -fx-background-color: #fff8ec;
     -fx-border-color: -vd-amber;
     -fx-border-width: 2px;
 }
 
-.slide-thumbnail {
-    -fx-background-color: -vd-cream;
-    -fx-background-radius: 3px;
-    -fx-padding: 5px;
-    -fx-effect: dropshadow(gaussian, rgba(20, 16, 12, 0.16), 5, 0, 0, 2);
+.collection-card:focused,
+.slide-card:focused {
+    -fx-border-color: -vd-champagne, -vd-warm-gray;
+    -fx-border-insets: 0, -3px;
+    -fx-border-width: 2px, 1px;
 }
 
-.collection-title {
+.collection-cover-frame {
+    -fx-background-color: -vd-cream;
+    -fx-background-radius: 4px;
+    -fx-padding: 5px;
+}
+
+.collection-card-title {
     -fx-text-fill: -vd-text;
-    -fx-font-size: 14px;
+    -fx-font-size: 13px;
     -fx-font-weight: 600;
 }
 
-.editor-card .list-cell {
-    -fx-background-color: white;
-    -fx-border-color: transparent transparent #ebe7e1 transparent;
-    -fx-padding: 10px 12px;
-    -fx-pref-height: 48px;
-    -fx-text-fill: #4b4742;
+.collection-card-metadata {
+    -fx-text-fill: -vd-muted;
+    -fx-font-size: 10px;
 }
 
-.editor-card .list-cell:selected {
-    -fx-background-color: #fff4e2;
-    -fx-border-color: transparent transparent transparent -vd-amber;
-    -fx-border-width: 0 0 0 3px;
-    -fx-text-fill: -vd-text;
+.slide-card {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 4px;
+    -fx-alignment: top-center;
+}
+
+.slide-card:hover {
+    -fx-background-color: rgba(244, 232, 209, 0.45);
+}
+
+.slide-card:selected {
+    -fx-background-color: #fff8ec;
+    -fx-border-color: -vd-amber;
+    -fx-border-width: 2px;
+}
+
+.slide-number {
+    -fx-text-fill: #5f5a54;
+    -fx-font-size: 11px;
+    -fx-font-weight: 600;
+}
+
+.slide-card.dragging { -fx-opacity: 0.55; }
+.slide-card.drop-target {
+    -fx-border-color: -vd-amber;
+    -fx-border-width: 0 3px 0 0;
 }
 
 .preview-box {

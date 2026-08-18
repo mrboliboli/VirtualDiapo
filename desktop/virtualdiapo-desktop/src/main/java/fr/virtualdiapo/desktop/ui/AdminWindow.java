@@ -17,8 +17,6 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
-import javafx.scene.control.ListCell;
-import javafx.scene.control.ListView;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextArea;
@@ -26,13 +24,10 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
-import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
@@ -54,8 +49,8 @@ public final class AdminWindow extends Application {
 
     private final ObservableList<SlideCollection> collections = FXCollections.observableArrayList();
     private final ObservableList<Path> selectedImages = FXCollections.observableArrayList();
-    private final ListView<SlideCollection> collectionList = new ListView<>(collections);
-    private final ListView<Path> imageList = new ListView<>(selectedImages);
+    private CollectionGridView collectionGrid;
+    private SlideGridView imageGrid;
     private final ImageView preview = new ImageView();
     private final TextField title = new TextField();
     private final TextArea description = new TextArea();
@@ -73,7 +68,6 @@ public final class AdminWindow extends Application {
     private final Button downButton = new Button("Descendre");
     private final Button removeButton = new Button("Retirer");
     private final Button deleteButton = new Button("Supprimer");
-    private int draggedImageIndex = -1;
 
     @Override
     public void init() {
@@ -108,8 +102,12 @@ public final class AdminWindow extends Application {
     }
 
     private VBox buildSidebar() {
-        var wordmark = new Label("VIRTUALDIAPO");
-        wordmark.getStyleClass().add("wordmark");
+        var logo = new ImageView(new Image(Objects.requireNonNull(
+                getClass().getResourceAsStream("/virtualdiapo-logo-horizontal-light.svg.png"))));
+        logo.setFitWidth(132);
+        logo.setFitHeight(36);
+        logo.setPreserveRatio(true);
+        logo.setSmooth(true);
 
         var navigation = new Label("Carrousels");
         navigation.getStyleClass().add("navigation-item-active");
@@ -128,7 +126,7 @@ public final class AdminWindow extends Application {
         serverName.getStyleClass().add("sidebar-detail");
         serverAddress.getStyleClass().add("sidebar-detail");
 
-        var sidebar = new VBox(28, wordmark, navigation, spacer, statusLine, serverName, serverAddress);
+        var sidebar = new VBox(28, logo, navigation, spacer, statusLine, serverName, serverAddress);
         sidebar.getStyleClass().add("sidebar");
         sidebar.setPrefWidth(166);
         sidebar.setMinWidth(150);
@@ -145,53 +143,15 @@ public final class AdminWindow extends Application {
         newButton.setOnAction(event -> clearForm());
         newButton.setMaxWidth(Double.MAX_VALUE);
         var header = new VBox(10, titles, newButton);
-        collectionList.setCellFactory(ignored -> new ListCell<>() {
-            @Override
-            protected void updateItem(SlideCollection item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(null);
-                setGraphic(empty || item == null ? null : createCollectionCellContent(item));
-            }
-        });
-        collectionList.getStyleClass().add("collection-list");
-        collectionList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, selected) -> {
-            if (selected != null) {
-                edit(selected);
-            }
-        });
-        VBox.setVgrow(collectionList, Priority.ALWAYS);
-        var pane = new VBox(16, header, collectionList);
+        collectionGrid = new CollectionGridView(collections, collection ->
+                importer.storedImagePath(collection.slides().getFirst().id()));
+        collectionGrid.setOnSelection(this::edit);
+        VBox.setVgrow(collectionGrid, Priority.ALWAYS);
+        var pane = new VBox(16, header, collectionGrid);
         pane.getStyleClass().addAll("surface-card", "catalog-card");
         pane.setPrefWidth(320);
         pane.setMinWidth(260);
         return pane;
-    }
-
-    private HBox createCollectionCellContent(SlideCollection collection) {
-        var thumbnail = new ImageView();
-        thumbnail.setFitWidth(70);
-        thumbnail.setFitHeight(54);
-        thumbnail.setPreserveRatio(true);
-        thumbnail.setSmooth(true);
-        if (!collection.slides().isEmpty()) {
-            var path = importer.storedImagePath(collection.slides().getFirst().id());
-            thumbnail.setImage(new Image(path.toUri().toString(), 140, 108, false, true, true));
-        }
-        var thumbnailFrame = new StackPane(thumbnail);
-        thumbnailFrame.getStyleClass().add("slide-thumbnail");
-        var name = new Label(collection.title());
-        name.getStyleClass().add("collection-title");
-        name.setWrapText(true);
-        name.setMaxWidth(155);
-        var details = collection.slides().size() + (collection.slides().size() > 1 ? " diapositives" : " diapositive")
-                + (collection.year() == null ? "" : "  ·  " + collection.year());
-        var metadata = new Label(details);
-        metadata.getStyleClass().add("collection-metadata");
-        var labels = new VBox(5, name, metadata);
-        labels.setAlignment(Pos.CENTER_LEFT);
-        var content = new HBox(12, thumbnailFrame, labels);
-        content.setAlignment(Pos.CENTER_LEFT);
-        return content;
     }
 
     private VBox buildImportPane(Stage stage) {
@@ -212,7 +172,7 @@ public final class AdminWindow extends Application {
         HBox.setHgrow(titleField, Priority.ALWAYS);
         var descriptionField = labelledField("Description", description);
 
-        preview.setFitWidth(180);
+        preview.setFitWidth(110);
         preview.setFitHeight(150);
         preview.setPreserveRatio(true);
         preview.setSmooth(true);
@@ -221,9 +181,11 @@ public final class AdminWindow extends Application {
         previewBox.getStyleClass().add("preview-box");
         BorderPane.setAlignment(preview, Pos.CENTER);
 
-        imageList.setCellFactory(ignored -> createImageCell());
-        imageList.getSelectionModel().selectedItemProperty().addListener((ignored, oldValue, path) -> {
-            showPreview(path);
+        var normalMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount.svg.png")));
+        var selectedMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount-selected.svg.png")));
+        imageGrid = new SlideGridView(selectedImages, normalMount, selectedMount);
+        imageGrid.setOnSelection(index -> {
+            showPreview(index >= 0 && index < selectedImages.size() ? selectedImages.get(index) : null);
             updateImageActions();
         });
         selectedImages.addListener((javafx.collections.ListChangeListener<Path>) ignored -> {
@@ -232,7 +194,7 @@ public final class AdminWindow extends Application {
         });
         updateImageCount();
         updateImageActions();
-        VBox.setVgrow(imageList, Priority.ALWAYS);
+        VBox.setVgrow(imageGrid, Priority.ALWAYS);
 
         chooseButton.setOnAction(event -> chooseImages(stage));
         upButton.setOnAction(event -> moveSelected(-1));
@@ -266,12 +228,12 @@ public final class AdminWindow extends Application {
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(status, Priority.ALWAYS);
 
-        var listPane = new VBox(imageList);
+        var listPane = new VBox(imageGrid);
         HBox.setHgrow(listPane, Priority.ALWAYS);
         var mediaPane = new HBox(14, listPane, previewBox);
         HBox.setHgrow(listPane, Priority.ALWAYS);
         VBox.setVgrow(mediaPane, Priority.ALWAYS);
-        previewBox.setPrefWidth(190);
+        previewBox.setPrefWidth(120);
         var pane = new VBox(14, editorTitles, firstRow, descriptionField,
                 new Separator(Orientation.HORIZONTAL), imageActions, mediaPane, footer);
         pane.getStyleClass().addAll("surface-card", "editor-card");
@@ -288,44 +250,6 @@ public final class AdminWindow extends Application {
         return box;
     }
 
-    private ListCell<Path> createImageCell() {
-        var cell = new ListCell<Path>() {
-            @Override
-            protected void updateItem(Path item, boolean empty) {
-                super.updateItem(item, empty);
-                setText(empty || item == null ? null : String.format("%02d    %s", getIndex() + 1, item.getFileName()));
-            }
-        };
-        cell.setOnDragDetected(event -> {
-            if (!cell.isEmpty()) {
-                draggedImageIndex = cell.getIndex();
-                var content = new ClipboardContent();
-                content.putString(Integer.toString(draggedImageIndex));
-                cell.startDragAndDrop(TransferMode.MOVE).setContent(content);
-                event.consume();
-            }
-        });
-        cell.setOnDragOver(event -> {
-            if (draggedImageIndex >= 0 && draggedImageIndex != cell.getIndex()) {
-                event.acceptTransferModes(TransferMode.MOVE);
-                event.consume();
-            }
-        });
-        cell.setOnDragDropped(event -> {
-            int target = cell.isEmpty() ? selectedImages.size() - 1 : cell.getIndex();
-            if (draggedImageIndex >= 0 && target >= 0 && target < selectedImages.size()) {
-                var image = selectedImages.remove(draggedImageIndex);
-                selectedImages.add(target, image);
-                imageList.getSelectionModel().select(target);
-                event.setDropCompleted(true);
-            }
-            draggedImageIndex = -1;
-            event.consume();
-        });
-        cell.setOnDragDone(event -> draggedImageIndex = -1);
-        return cell;
-    }
-
     private void chooseImages(Stage stage) {
         var chooser = new FileChooser();
         chooser.setTitle("Choisir les diapositives JPEG");
@@ -338,7 +262,7 @@ public final class AdminWindow extends Application {
                     .toList();
             selectedImages.addAll(additions);
             if (!additions.isEmpty()) {
-                imageList.getSelectionModel().select(selectedImages.size() - additions.size());
+                imageGrid.select(selectedImages.size() - additions.size());
             } else {
                 status.setText("Ces images sont déjà présentes dans la collection.");
             }
@@ -346,21 +270,21 @@ public final class AdminWindow extends Application {
     }
 
     private void moveSelected(int offset) {
-        int from = imageList.getSelectionModel().getSelectedIndex();
+        int from = imageGrid.getSelectedIndex();
         int to = from + offset;
         if (from >= 0 && to >= 0 && to < selectedImages.size()) {
             var image = selectedImages.remove(from);
             selectedImages.add(to, image);
-            imageList.getSelectionModel().select(to);
+            imageGrid.select(to);
         }
     }
 
     private void removeSelected() {
-        int index = imageList.getSelectionModel().getSelectedIndex();
+        int index = imageGrid.getSelectedIndex();
         if (index >= 0) {
             selectedImages.remove(index);
             if (!selectedImages.isEmpty()) {
-                imageList.getSelectionModel().select(Math.min(index, selectedImages.size() - 1));
+                imageGrid.select(Math.min(index, selectedImages.size() - 1));
             } else {
                 preview.setImage(null);
             }
@@ -421,11 +345,11 @@ public final class AdminWindow extends Application {
     }
 
     private void setBusy(boolean busy) {
-        collectionList.setDisable(busy);
+        collectionGrid.setDisable(busy);
         title.setDisable(busy);
         description.setDisable(busy);
         year.setDisable(busy);
-        imageList.setDisable(busy);
+        imageGrid.setDisable(busy);
         saveButton.setDisable(busy);
         resetButton.setDisable(busy);
         chooseButton.setDisable(busy);
@@ -448,7 +372,7 @@ public final class AdminWindow extends Application {
     }
 
     private void updateImageActions() {
-        int index = imageList.getSelectionModel().getSelectedIndex();
+        int index = imageGrid.getSelectedIndex();
         upButton.setDisable(index <= 0);
         downButton.setDisable(index < 0 || index >= selectedImages.size() - 1);
         removeButton.setDisable(index < 0);
@@ -459,7 +383,7 @@ public final class AdminWindow extends Application {
         status.setText(message);
         var error = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
         error.setHeaderText(header);
-        error.initOwner(collectionList.getScene().getWindow());
+        error.initOwner(status.getScene().getWindow());
         error.initModality(Modality.WINDOW_MODAL);
         error.showAndWait();
     }
@@ -477,7 +401,7 @@ public final class AdminWindow extends Application {
         editorHeading.setText("Nouveau carrousel");
         editorMetadata.setText("Préparez une nouvelle collection de diapositives");
         deleteButton.setDisable(true);
-        collectionList.getSelectionModel().clearSelection();
+        collectionGrid.select(null);
         title.clear();
         description.clear();
         year.clear();
@@ -501,7 +425,7 @@ public final class AdminWindow extends Application {
         if (selectedImages.isEmpty()) {
             preview.setImage(null);
         } else {
-            imageList.getSelectionModel().selectFirst();
+            imageGrid.select(0);
         }
         status.setText("Modification de « " + collection.title() + " » (" + collection.slides().size() + " images).");
     }
@@ -515,7 +439,7 @@ public final class AdminWindow extends Application {
                 "Supprimer « " + editedCollection.title() + " » et toutes ses images ?",
                 ButtonType.CANCEL, ButtonType.OK);
         confirmation.setHeaderText("Suppression définitive");
-        confirmation.initOwner(collectionList.getScene().getWindow());
+        confirmation.initOwner(status.getScene().getWindow());
         confirmation.initModality(Modality.WINDOW_MODAL);
         if (confirmation.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
             return;
@@ -543,9 +467,13 @@ public final class AdminWindow extends Application {
             collections.stream()
                     .filter(collection -> Objects.equals(collection.id(), collectionToSelect))
                     .findFirst()
-                    .ifPresent(collectionList.getSelectionModel()::select);
+                    .ifPresent(collection -> {
+                        collectionGrid.select(collection);
+                        edit(collection);
+                    });
         } else if (editedCollection == null && !collections.isEmpty()) {
-            collectionList.getSelectionModel().selectFirst();
+            collectionGrid.select(collections.getFirst());
+            edit(collections.getFirst());
         }
     }
 
