@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="720" viewBox="0 0 1024 720">
+<defs>
+  <radialGradient id="lens" cx="45%" cy="43%" r="62%">
+    <stop offset="0" stop-color="#FFF4D4"/>
+    <stop offset=".28" stop-color="#F5C46E"/>
+    <stop offset=".62" stop-color="#E39A3E"/>
+    <stop offset="1" stop-color="#75451F"/>
+  </radialGradient>
+  <linearGradient id="beam" x1="0" y1=".5" x2="1" y2=".5">
+    <stop offset="0" stop-color="#E8A84C" stop-opacity=".55"/>
+    <stop offset=".72" stop-color="#E8A84C" stop-opacity=".17"/>
+    <stop offset="1" stop-color="#E8A84C" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<!-- Transparent background.
+     DARK variant: dark symbol intended for light/cream backgrounds. -->
+
+<!-- screen -->
+<rect x="666" y="115" width="225" height="170" rx="8"
+      fill="none" stroke="#17191D" stroke-width="22"/>
+<line x1="779" y1="285" x2="779" y2="329"
+      stroke="#17191D" stroke-width="16" stroke-linecap="round"/>
+
+<!-- beam -->
+<path d="M495 369 L679 166 L679 270 L495 432 Z"
+      fill="url(#beam)"/>
+
+<!-- projector body -->
+<rect x="154" y="321" width="294" height="166" rx="44"
+      fill="#F0DFC4" stroke="#17191D" stroke-width="20"/>
+
+<!-- control panel -->
+<rect x="177" y="344" width="81" height="120" rx="20"
+      fill="#D9BE96" stroke="#17191D" stroke-width="8"/>
+<circle cx="208" cy="371" r="8" fill="#17191D"/>
+
+<!-- lens -->
+<circle cx="449" cy="404" r="86"
+        fill="#F0DFC4" stroke="#17191D" stroke-width="18"/>
+<circle cx="449" cy="404" r="59"
+        fill="#241C16" stroke="#9D6C38" stroke-width="8"/>
+<circle cx="449" cy="404" r="39" fill="url(#lens)"/>
+<circle cx="449" cy="404" r="21" fill="#FFF1C9"/>
+
+<!-- feet -->
+<path d="M203 488 L188 522" stroke="#17191D" stroke-width="17" stroke-linecap="round"/>
+<path d="M385 488 L400 522" stroke="#17191D" stroke-width="17" stroke-linecap="round"/>
+</svg>

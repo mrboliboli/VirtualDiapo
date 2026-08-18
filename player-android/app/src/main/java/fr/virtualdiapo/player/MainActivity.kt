@@ -7,27 +7,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,26 +33,31 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Precision
 import fr.virtualdiapo.player.model.SlideCollection
-import fr.virtualdiapo.player.model.CollectionSummary
-import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
-import fr.virtualdiapo.player.projection.ProjectionState
-import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.network.DiscoveredServer
 import fr.virtualdiapo.player.network.DiscoveryStatus
+import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
+import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
+import fr.virtualdiapo.player.projection.ProjectionState
+import fr.virtualdiapo.player.ui.CarouselHomeScreen
+import fr.virtualdiapo.player.ui.CarouselLoadingScreen
+import fr.virtualdiapo.player.ui.DiscoveryFailureScreen
+import fr.virtualdiapo.player.ui.DiscoveryScreen
+import fr.virtualdiapo.player.ui.SplashScreen
+import fr.virtualdiapo.player.ui.theme.VirtualDiapoTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val SPLASH_DURATION_MS = 1_800L
 
 class MainActivity : ComponentActivity() {
     private lateinit var discovery: VirtualDiapoDiscovery
@@ -80,11 +72,16 @@ class MainActivity : ComponentActivity() {
         }
         discovery = VirtualDiapoDiscovery(applicationContext)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            VirtualDiapoTheme {
                 val viewModel: MainViewModel = viewModel()
                 val servers by discovery.servers.collectAsState()
                 val discoveryStatus by discovery.status.collectAsState()
-                VirtualDiapoApp(viewModel, servers, discoveryStatus)
+                VirtualDiapoApp(
+                    viewModel = viewModel,
+                    servers = servers,
+                    discoveryStatus = discoveryStatus,
+                    retryDiscovery = discovery::start,
+                )
             }
         }
     }
@@ -94,128 +91,80 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun darkColorScheme() = androidx.compose.material3.darkColorScheme(
-    primary = Color(0xFFC9A75D),
-    background = Color.Black,
-    surface = Color(0xFF171512),
-)
-
-@Composable
 private fun VirtualDiapoApp(
     viewModel: MainViewModel,
     servers: List<DiscoveredServer>,
     discoveryStatus: DiscoveryStatus,
+    retryDiscovery: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+    var splashFinished by rememberSaveable { mutableStateOf(false) }
+    var discoveryTimedOut by rememberSaveable { mutableStateOf(false) }
+    var retryKey by rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        delay(SPLASH_DURATION_MS)
+        splashFinished = true
+    }
+    if (!splashFinished) {
+        SplashScreen()
+        return
+    }
+
     when (val current = state) {
-        PlayerUiState.Setup -> ConnectionScreen(
-            servers = servers,
-            discoveryStatus = discoveryStatus,
-            onConnect = viewModel::connect,
-        )
-        PlayerUiState.Loading -> LoadingScreen()
-        is PlayerUiState.CollectionSelection -> {
-            BackHandler(onBack = viewModel::returnToSetup)
-            CollectionSelectionScreen(current.collections) { id ->
-                viewModel.selectCollection(current.address, id)
+        PlayerUiState.Setup -> {
+            val server = servers.firstOrNull()
+            LaunchedEffect(server?.address, retryKey) {
+                if (server != null) viewModel.connect(server.address)
+            }
+            if (discoveryTimedOut || discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
+                DiscoveryFailureScreen(
+                    message = null,
+                    initialAddress = "10.0.2.2:8080",
+                    onRetry = {
+                        discoveryTimedOut = false
+                        retryKey++
+                        retryDiscovery()
+                    },
+                    onConnect = viewModel::connect,
+                )
+            } else {
+                DiscoveryScreen(
+                    connecting = server != null,
+                    unavailable = discoveryStatus == DiscoveryStatus.UNAVAILABLE,
+                    retryKey = retryKey,
+                    onTimeout = { discoveryTimedOut = true },
+                )
             }
         }
-        is PlayerUiState.Failure -> ConnectionScreen(
-            error = current.message,
-            servers = servers,
-            discoveryStatus = discoveryStatus,
+        PlayerUiState.Connecting -> DiscoveryScreen(
+            connecting = true,
+            unavailable = false,
+            retryKey = retryKey,
+            onTimeout = {},
+        )
+        is PlayerUiState.LoadingCarousel -> CarouselLoadingScreen(current.title)
+        is PlayerUiState.CollectionSelection -> {
+            BackHandler(onBack = viewModel::returnToSetup)
+            CarouselHomeScreen(current.collections) { collection ->
+                viewModel.selectCollection(current.address, collection)
+            }
+        }
+        is PlayerUiState.Failure -> DiscoveryFailureScreen(
+            message = current.message,
             initialAddress = current.address,
+            onRetry = {
+                discoveryTimedOut = false
+                retryKey++
+                viewModel.returnToSetup()
+                retryDiscovery()
+            },
             onConnect = viewModel::connect,
         )
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)
             ProjectionScreen(current.collection)
         }
-    }
-}
-
-@Composable
-private fun CollectionSelectionScreen(
-    collections: List<CollectionSummary>,
-    onSelect: (String) -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(64.dp),
-    ) {
-        Text("Choisir une collection", style = MaterialTheme.typography.headlineLarge, color = Color(0xFFE8DFC8))
-        Spacer(Modifier.height(24.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(collections, key = { it.id }) { collection ->
-                Button(
-                    onClick = { onSelect(collection.id) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                        Text(collection.title, style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            listOfNotNull(collection.year?.toString(), "${collection.slideCount} images")
-                                .joinToString(" · "),
-                        )
-                        collection.description?.let { Text(it) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionScreen(
-    error: String? = null,
-    servers: List<DiscoveredServer> = emptyList(),
-    discoveryStatus: DiscoveryStatus = DiscoveryStatus.STOPPED,
-    initialAddress: String = "10.0.2.2:8080",
-    onConnect: (String) -> Unit,
-) {
-    var address by remember(initialAddress) { mutableStateOf(initialAddress) }
-    val buttonFocus = remember { FocusRequester() }
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF171512)).padding(72.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("VIRTUALDIAPO", style = MaterialTheme.typography.displaySmall, color = Color(0xFFE8DFC8))
-        Text("Adresse du Mac", modifier = Modifier.padding(top = 32.dp, bottom = 8.dp))
-        OutlinedTextField(
-            value = address,
-            onValueChange = { address = it },
-            modifier = Modifier.fillMaxWidth(0.55f),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-        )
-        if (error != null) {
-            Text(error, color = Color(0xFFE29A82), modifier = Modifier.padding(top = 12.dp))
-        }
-        Button(
-            onClick = { onConnect(address) },
-            modifier = Modifier.padding(top = 24.dp).focusRequester(buttonFocus),
-        ) { Text("Charger le projecteur") }
-        if (servers.isNotEmpty()) {
-            Text("Serveurs détectés", modifier = Modifier.padding(top = 28.dp, bottom = 8.dp))
-            servers.forEach { server ->
-                Button(onClick = { onConnect(server.address) }, modifier = Modifier.padding(top = 6.dp)) {
-                    Text("${server.name} · ${server.address}")
-                }
-            }
-        } else if (discoveryStatus == DiscoveryStatus.SEARCHING) {
-            Text("Recherche d’un serveur VirtualDiapo…", modifier = Modifier.padding(top = 24.dp))
-        } else if (discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
-            Text("Découverte automatique indisponible — utilisez l’adresse manuelle.",
-                modifier = Modifier.padding(top = 24.dp))
-        }
-    }
-    LaunchedEffect(Unit) { buttonFocus.requestFocus() }
-}
-
-@Composable
-private fun LoadingScreen() {
-    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = Color(0xFFC9A75D))
     }
 }
 
@@ -284,13 +233,7 @@ private fun ProjectionScreen(collection: SlideCollection) {
         is ProjectionState.EndOfCarousel -> slideCount - 1
     }
 
-    PreloadAdjacentImages(
-        collection,
-        preloadIndex,
-        imageLoader,
-        projectionWidth,
-        projectionHeight,
-    )
+    PreloadAdjacentImages(collection, preloadIndex, imageLoader, projectionWidth, projectionHeight)
     DisposableEffect(Unit) { onDispose(sound::release) }
 
     Box(
@@ -310,8 +253,7 @@ private fun ProjectionScreen(collection: SlideCollection) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        val visibleSlideIndex = projection.visibleSlideIndex()
-        if (visibleSlideIndex != null) {
+        projection.visibleSlideIndex()?.let { visibleSlideIndex ->
             AsyncImage(
                 model = imageRequest(visibleSlideIndex),
                 contentDescription = null,
