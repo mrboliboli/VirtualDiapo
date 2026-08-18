@@ -192,10 +192,6 @@ public final class AdminWindow extends Application {
         title.setPromptText("Titre");
         title.setTextFormatter(new TextFormatter<String>(change ->
                 change.getControlNewText().length() <= SlideCollection.MAX_TITLE_LENGTH ? change : null));
-        title.textProperty().addListener((ignored, oldValue, value) -> {
-            editorHeading.setText(value.isBlank() ? "Nouveau carrousel" : value);
-            updateEditorMetadata();
-        });
         description.setPromptText("Description (facultative)");
         description.setPrefRowCount(2);
         year.setPromptText("Année (facultative)");
