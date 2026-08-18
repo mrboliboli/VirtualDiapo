@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="720" viewBox="0 0 1024 720">
+<defs>
+  <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#292725"/>
+    <stop offset=".55" stop-color="#17191B"/>
+    <stop offset="1" stop-color="#0D0F11"/>
+  </linearGradient>
+  <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#F3DEC0"/>
+    <stop offset="1" stop-color="#D6B68D"/>
+  </linearGradient>
+</defs>
+
+<!-- transparent background -->
+
+<!-- carousel body, simplified from the approved VirtualDiapo carousel -->
+<ellipse cx="512" cy="335" rx="315" ry="118"
+         fill="#222321" stroke="#D5B17C" stroke-width="13"/>
+
+<path d="M197 335
+         C205 404 255 448 315 467
+         C430 504 594 504 709 467
+         C769 448 819 404 827 335
+         L827 438
+         C827 518 687 572 512 572
+         C337 572 197 518 197 438 Z"
+      fill="url(#body)" stroke="#D5B17C" stroke-width="13"/>
+
+<!-- radial slide slots -->
+<g stroke="#D8C19D" stroke-width="9" stroke-linecap="round" opacity=".95">
+  <path d="M242 311 L299 326"/>
+  <path d="M269 274 L322 300"/>
+  <path d="M310 245 L354 282"/>
+  <path d="M361 224 L395 270"/>
+  <path d="M418 210 L438 263"/>
+  <path d="M478 204 L485 260"/>
+  <path d="M546 204 L539 260"/>
+  <path d="M606 210 L586 263"/>
+  <path d="M663 224 L629 270"/>
+  <path d="M714 245 L670 282"/>
+  <path d="M755 274 L702 300"/>
+  <path d="M782 311 L725 326"/>
+</g>
+
+<!-- central hub -->
+<ellipse cx="512" cy="335" rx="137" ry="61"
+         fill="#0B0D0F" stroke="#D5B17C" stroke-width="11"/>
+<ellipse cx="512" cy="335" rx="66" ry="28"
+         fill="#1C1D1D" stroke="#8E7556" stroke-width="7"/>
+
+<!-- one upright slide, like the pedagogical carousel symbol in the approved board -->
+<rect x="457" y="137" width="110" height="150" rx="8"
+      fill="url(#paper)" stroke="#B69770" stroke-width="8"/>
+<rect x="480" y="166" width="64" height="86" rx="3"
+      fill="#292A29" stroke="#806A50" stroke-width="5"/>
+
+<!-- small blank paper label -->
+<rect x="390" y="426" width="244" height="79" rx="10"
+      fill="url(#paper)" stroke="#B69770" stroke-width="6"/>
+</svg>

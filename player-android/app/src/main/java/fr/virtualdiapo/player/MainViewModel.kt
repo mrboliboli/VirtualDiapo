@@ -13,7 +13,8 @@ import kotlinx.coroutines.launch
 
 sealed interface PlayerUiState {
     data object Setup : PlayerUiState
-    data object Loading : PlayerUiState
+    data object Connecting : PlayerUiState
+    data class LoadingCarousel(val title: String) : PlayerUiState
     data class CollectionSelection(val address: String, val collections: List<CollectionSummary>) : PlayerUiState
     data class Ready(val collection: SlideCollection) : PlayerUiState
     data class Failure(val message: String, val address: String) : PlayerUiState
@@ -27,23 +28,34 @@ class MainViewModel(
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
 
     fun connect(address: String) {
-        _state.value = PlayerUiState.Loading
+        if (_state.value == PlayerUiState.Connecting) return
+        _state.value = PlayerUiState.Connecting
         viewModelScope.launch {
-            _state.value = runCatching { apiClient.loadCollections(address) }
-                .fold(
-                    onSuccess = { collections ->
-                        if (collections.isEmpty()) PlayerUiState.Failure("Le serveur ne contient aucune collection", address)
-                        else PlayerUiState.CollectionSelection(address, collections).also { lastSelection = it }
-                    },
-                    onFailure = { PlayerUiState.Failure(connectionErrorMessage(it), address) },
-                )
+            runCatching { apiClient.loadCollections(address) }
+                .onFailure { _state.value = PlayerUiState.Failure(connectionErrorMessage(it), address) }
+                .onSuccess { collections ->
+                    if (collections.isEmpty()) {
+                        _state.value = PlayerUiState.Failure("Le serveur ne contient aucun carrousel", address)
+                        return@onSuccess
+                    }
+                    updateSelection(PlayerUiState.CollectionSelection(address, collections))
+                    collections.forEach { summary ->
+                        val cover = runCatching {
+                            apiClient.loadCollection(address, summary.id).slides.firstOrNull()?.imageUrl
+                        }.getOrNull() ?: return@forEach
+                        val current = _state.value as? PlayerUiState.CollectionSelection ?: return@forEach
+                        updateSelection(current.copy(collections = current.collections.map {
+                            if (it.id == summary.id) it.copy(coverImageUrl = cover) else it
+                        }))
+                    }
+                }
         }
     }
 
-    fun selectCollection(address: String, collectionId: String) {
-        _state.value = PlayerUiState.Loading
+    fun selectCollection(address: String, collection: CollectionSummary) {
+        _state.value = PlayerUiState.LoadingCarousel(collection.title)
         viewModelScope.launch {
-            _state.value = runCatching { apiClient.loadCollection(address, collectionId) }
+            _state.value = runCatching { apiClient.loadCollection(address, collection.id) }
                 .fold(
                     onSuccess = PlayerUiState::Ready,
                     onFailure = { PlayerUiState.Failure(connectionErrorMessage(it), address) },
@@ -57,5 +69,10 @@ class MainViewModel(
 
     fun returnToCollections() {
         _state.value = lastSelection ?: PlayerUiState.Setup
+    }
+
+    private fun updateSelection(selection: PlayerUiState.CollectionSelection) {
+        lastSelection = selection
+        _state.value = selection
     }
 }

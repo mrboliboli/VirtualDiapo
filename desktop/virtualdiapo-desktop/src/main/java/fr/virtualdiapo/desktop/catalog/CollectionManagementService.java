@@ -25,6 +25,9 @@ public final class CollectionManagementService {
         if (title == null || title.isBlank()) {
             throw new IllegalArgumentException("Le titre est obligatoire");
         }
+        if (title.trim().length() > SlideCollection.MAX_TITLE_LENGTH) {
+            throw new IllegalArgumentException("Le titre est limité à " + SlideCollection.MAX_TITLE_LENGTH + " caractères");
+        }
         var current = catalog.findById(id).orElseThrow(() -> new IllegalArgumentException("Collection introuvable"));
         var updated = new SlideCollection(id, title.trim(), blankToNull(description), year, current.slides());
         catalog.update(updated);

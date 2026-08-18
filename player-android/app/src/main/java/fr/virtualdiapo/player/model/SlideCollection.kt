@@ -6,6 +6,7 @@ data class CollectionSummary(
     val description: String?,
     val year: Int?,
     val slideCount: Int,
+    val coverImageUrl: String? = null,
 )
 
 data class SlideCollection(
