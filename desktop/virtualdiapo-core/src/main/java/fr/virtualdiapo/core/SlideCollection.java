@@ -12,6 +12,8 @@ public record SlideCollection(
         Integer year,
         List<Slide> slides
 ) {
+    public static final int MAX_TITLE_LENGTH = 50;
+
     public SlideCollection {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(title, "title");
@@ -19,9 +21,11 @@ public record SlideCollection(
         if (title.isBlank()) {
             throw new IllegalArgumentException("title must not be blank");
         }
+        if (title.length() > MAX_TITLE_LENGTH) {
+            throw new IllegalArgumentException("title must not exceed " + MAX_TITLE_LENGTH + " characters");
+        }
         slides = slides.stream()
                 .sorted(Comparator.comparingInt(Slide::position))
                 .toList();
     }
 }
-

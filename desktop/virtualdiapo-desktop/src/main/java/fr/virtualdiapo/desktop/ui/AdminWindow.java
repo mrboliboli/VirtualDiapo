@@ -25,6 +25,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextFormatter;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.ClipboardContent;
@@ -131,6 +132,8 @@ public final class AdminWindow extends Application {
         var heading = new Label("Nouvelle collection");
         heading.setStyle("-fx-font-size: 17px; -fx-font-weight: bold;");
         title.setPromptText("Titre");
+        title.setTextFormatter(new TextFormatter<String>(change ->
+                change.getControlNewText().length() <= SlideCollection.MAX_TITLE_LENGTH ? change : null));
         description.setPromptText("Description (facultative)");
         description.setPrefRowCount(2);
         year.setPromptText("Année (facultative)");

@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class SlideCollectionTest {
     @Test
@@ -20,5 +21,11 @@ class SlideCollectionTest {
         assertEquals(List.of(first, second), collection.slides());
         assertThrows(UnsupportedOperationException.class, () -> collection.slides().add(first));
     }
-}
 
+    @Test
+    void titleIsLimitedToFiftyCharacters() {
+        assertThrows(IllegalArgumentException.class, () -> new SlideCollection(
+                UUID.randomUUID(), "x".repeat(51), null, null, List.of()
+        ));
+    }
+}

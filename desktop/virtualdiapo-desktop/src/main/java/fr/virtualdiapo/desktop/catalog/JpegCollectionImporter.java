@@ -57,7 +57,7 @@ public final class JpegCollectionImporter {
 
     public SlideCollection updateFiles(UUID collectionId, String title, String description, Integer year,
                                        List<Path> images) throws IOException {
-        if (title == null || title.isBlank()) throw new IllegalArgumentException("Le titre est obligatoire");
+        validateTitle(title);
         if (images == null || images.isEmpty()) {
             throw new IllegalArgumentException("Une collection doit contenir au moins une image JPEG");
         }
@@ -109,9 +109,7 @@ public final class JpegCollectionImporter {
 
     private SlideCollection importSources(String title, String description, Integer year,
                                           List<ImageSource> images) throws IOException {
-        if (title == null || title.isBlank()) {
-            throw new IllegalArgumentException("Le titre est obligatoire");
-        }
+        validateTitle(title);
         if (images.isEmpty()) {
             throw new IllegalArgumentException("Sélectionnez au moins une image JPEG");
         }
@@ -196,5 +194,14 @@ public final class JpegCollectionImporter {
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static void validateTitle(String title) {
+        if (title == null || title.isBlank()) {
+            throw new IllegalArgumentException("Le titre est obligatoire");
+        }
+        if (title.trim().length() > SlideCollection.MAX_TITLE_LENGTH) {
+            throw new IllegalArgumentException("Le titre est limité à " + SlideCollection.MAX_TITLE_LENGTH + " caractères");
+        }
     }
 }

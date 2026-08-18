@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420">
+<defs>
+  <radialGradient id="lens" cx="45%" cy="43%" r="62%">
+    <stop offset="0" stop-color="#FFF4D4"/>
+    <stop offset=".28" stop-color="#F5C46E"/>
+    <stop offset=".62" stop-color="#E39A3E"/>
+    <stop offset="1" stop-color="#75451F"/>
+  </radialGradient>
+  <linearGradient id="beam" x1="0" y1=".5" x2="1" y2=".5">
+    <stop offset="0" stop-color="#E8A84C" stop-opacity=".55"/>
+    <stop offset=".72" stop-color="#E8A84C" stop-opacity=".17"/>
+    <stop offset="1" stop-color="#E8A84C" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<!-- Transparent background.
+     DARK variant = dark artwork intended for light/cream backgrounds. -->
+
+<!-- compact projector + screen symbol -->
+<g transform="translate(36 76)">
+  <rect x="304" y="12" width="116" height="88" rx="5"
+        fill="none" stroke="#17191D" stroke-width="12"/>
+  <line x1="362" y1="100" x2="362" y2="124"
+        stroke="#17191D" stroke-width="9" stroke-linecap="round"/>
+
+  <path d="M228 136 L312 42 L312 94 L228 168 Z" fill="url(#beam)"/>
+
+  <rect x="38" y="112" width="160" height="90" rx="24"
+        fill="#F0DFC4" stroke="#17191D" stroke-width="12"/>
+  <rect x="50" y="124" width="45" height="66" rx="11"
+        fill="#D9BE96" stroke="#17191D" stroke-width="5"/>
+  <circle cx="68" cy="140" r="4.5" fill="#17191D"/>
+
+  <circle cx="198" cy="157" r="48"
+          fill="#F0DFC4" stroke="#17191D" stroke-width="11"/>
+  <circle cx="198" cy="157" r="33"
+          fill="#241C16" stroke="#9D6C38" stroke-width="5"/>
+  <circle cx="198" cy="157" r="22" fill="url(#lens)"/>
+  <circle cx="198" cy="157" r="11" fill="#FFF1C9"/>
+
+  <path d="M67 204 L60 222" stroke="#17191D" stroke-width="10" stroke-linecap="round"/>
+  <path d="M166 204 L173 222" stroke="#17191D" stroke-width="10" stroke-linecap="round"/>
+</g>
+
+<!-- wordmark: placement follows the approved horizontal lockup -->
+<text x="500" y="213"
+      font-family="Inter, Arial, sans-serif"
+      font-size="112"
+      font-weight="500"
+      letter-spacing="12"
+      fill="#17191D">VIRTUALDIAPO</text>
+
+<!-- tagline intentionally NOT included:
+     it remains live UI text per the validated design specification. -->
+</svg>

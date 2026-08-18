@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="720" viewBox="0 0 1024 720">
+<!-- Transparent background.
+     Strict monochrome variant of the approved VirtualDiapo symbol.
+     All visible artwork uses currentColor so the host can render it
+     in white, black, cream, etc. without changing the SVG geometry. -->
+
+<!-- screen -->
+<rect x="666" y="115" width="225" height="170" rx="8"
+      fill="none" stroke="currentColor" stroke-width="22"/>
+<line x1="779" y1="285" x2="779" y2="329"
+      stroke="currentColor" stroke-width="16" stroke-linecap="round"/>
+
+<!-- projection beam, monochrome and deliberately restrained -->
+<path d="M495 369 L679 166 L679 270 L495 432 Z"
+      fill="currentColor" opacity=".18"/>
+
+<!-- projector body -->
+<rect x="154" y="321" width="294" height="166" rx="44"
+      fill="none" stroke="currentColor" stroke-width="20"/>
+
+<!-- control panel -->
+<rect x="177" y="344" width="81" height="120" rx="20"
+      fill="none" stroke="currentColor" stroke-width="8"/>
+<circle cx="208" cy="371" r="8" fill="currentColor"/>
+
+<!-- lens -->
+<circle cx="449" cy="404" r="86"
+        fill="none" stroke="currentColor" stroke-width="18"/>
+<circle cx="449" cy="404" r="59"
+        fill="none" stroke="currentColor" stroke-width="8"/>
+<circle cx="449" cy="404" r="28" fill="currentColor"/>
+
+<!-- feet -->
+<path d="M203 488 L188 522" stroke="currentColor" stroke-width="17" stroke-linecap="round"/>
+<path d="M385 488 L400 522" stroke="currentColor" stroke-width="17" stroke-linecap="round"/>
+</svg>
