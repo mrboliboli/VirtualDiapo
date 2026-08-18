@@ -44,8 +44,8 @@ final class SlideGridView extends ScrollPane {
         getStyleClass().add("slide-grid-scroll");
         tiles.getStyleClass().add("slide-grid");
         tiles.setPadding(new Insets(2));
-        tiles.setPrefTileWidth(104);
-        tiles.setPrefTileHeight(124);
+        tiles.setPrefTileWidth(92);
+        tiles.setPrefTileHeight(112);
         setContent(tiles);
         setFitToWidth(true);
         setHbarPolicy(ScrollBarPolicy.NEVER);
@@ -89,20 +89,23 @@ final class SlideGridView extends ScrollPane {
         tiles.getChildren().setAll(java.util.stream.IntStream.range(0, items.size())
                 .mapToObj(this::createCard).toList());
         if (previous >= 0) select(previous);
-        else selectedIndex.set(-1);
+        else {
+            selectedIndex.set(-1);
+            selectionHandler.accept(-1);
+        }
     }
 
     private ToggleButton createCard(int index) {
         var path = items.get(index);
         var photo = new ImageView();
-        photo.setFitWidth(38);
-        photo.setFitHeight(38);
+        photo.setFitWidth(33);
+        photo.setFitHeight(33);
         photo.setPreserveRatio(false);
         photo.setSmooth(true);
         setSquareImage(photo, new Image(path.toUri().toString(), true));
         var mount = new ImageView(normalMount);
-        mount.setFitWidth(94);
-        mount.setFitHeight(94);
+        mount.setFitWidth(82);
+        mount.setFitHeight(82);
         mount.setPreserveRatio(true);
         mount.setSmooth(true);
         var composition = new StackPane(mount, photo);

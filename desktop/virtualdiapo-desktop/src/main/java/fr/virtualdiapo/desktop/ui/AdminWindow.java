@@ -10,10 +10,12 @@ import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.concurrent.Task;
+import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
@@ -24,10 +26,12 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
@@ -51,12 +55,18 @@ public final class AdminWindow extends Application {
     private final ObservableList<Path> selectedImages = FXCollections.observableArrayList();
     private CollectionGridView collectionGrid;
     private SlideGridView imageGrid;
+    private VBox catalogView;
+    private VBox editorView;
+    private VBox metadataForm;
+    private Button editInfoButton;
+    private Button backButton;
     private final ImageView preview = new ImageView();
     private final TextField title = new TextField();
     private final TextArea description = new TextArea();
     private final TextField year = new TextField();
     private final Label status = new Label();
-    private final Label imageCount = new Label("0 image");
+    private final Label previewFilename = new Label("Sélectionnez une diapositive");
+    private final Label previewPosition = new Label();
     private final Label editorHeading = new Label("Nouveau carrousel");
     private final Label editorMetadata = new Label("Préparez une nouvelle collection de diapositives");
     private final ProgressIndicator progress = new ProgressIndicator();
@@ -68,6 +78,8 @@ public final class AdminWindow extends Application {
     private final Button downButton = new Button("Descendre");
     private final Button removeButton = new Button("Retirer");
     private final Button deleteButton = new Button("Supprimer");
+    private boolean returnToCatalogAfterSave;
+    private boolean busy;
 
     @Override
     public void init() {
@@ -94,10 +106,14 @@ public final class AdminWindow extends Application {
         var root = new BorderPane();
         root.getStyleClass().add("app-root");
         root.setLeft(buildSidebar());
-        var workspace = new HBox(18, buildCatalogPane(), buildImportPane(stage));
+        catalogView = buildCatalogPane();
+        editorView = buildImportPane(stage);
+        var workspace = new StackPane(catalogView, editorView);
         workspace.getStyleClass().add("workspace");
-        HBox.setHgrow(workspace.getChildren().get(1), Priority.ALWAYS);
+        workspace.widthProperty().addListener((ignored, oldWidth, width) ->
+                workspace.setPadding(new Insets(width.doubleValue() < 900 ? 16 : 22)));
         root.setCenter(workspace);
+        showCatalog();
         return root;
     }
 
@@ -140,17 +156,23 @@ public final class AdminWindow extends Application {
         subtitle.getStyleClass().add("section-subtitle");
         var titles = new VBox(2, heading, subtitle);
         newButton.getStyleClass().add("primary-button");
-        newButton.setOnAction(event -> clearForm());
-        newButton.setMaxWidth(Double.MAX_VALUE);
-        var header = new VBox(10, titles, newButton);
+        newButton.setOnAction(event -> {
+            clearForm();
+            showEditor(true);
+        });
+        var headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        var header = new HBox(16, titles, headerSpacer, newButton);
+        header.setAlignment(Pos.CENTER_LEFT);
         collectionGrid = new CollectionGridView(collections, collection ->
                 importer.storedImagePath(collection.slides().getFirst().id()));
-        collectionGrid.setOnSelection(this::edit);
+        collectionGrid.setOnSelection(collection -> {
+            edit(collection);
+            showEditor(false);
+        });
         VBox.setVgrow(collectionGrid, Priority.ALWAYS);
         var pane = new VBox(16, header, collectionGrid);
-        pane.getStyleClass().addAll("surface-card", "catalog-card");
-        pane.setPrefWidth(320);
-        pane.setMinWidth(260);
+        pane.getStyleClass().addAll("surface-card", "catalog-view");
         return pane;
     }
 
@@ -158,12 +180,26 @@ public final class AdminWindow extends Application {
         editorHeading.getStyleClass().add("section-heading");
         editorMetadata.getStyleClass().add("section-subtitle");
         var editorTitles = new VBox(2, editorHeading, editorMetadata);
+        backButton = new Button("←  Mes carrousels");
+        backButton.getStyleClass().add("back-button");
+        backButton.setOnAction(event -> requestCatalogReturn());
+        editInfoButton = new Button("Modifier les informations");
+        editInfoButton.getStyleClass().add("secondary-button");
+        var headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+        var editorHeader = new HBox(14, backButton, editorTitles, headerSpacer, editInfoButton);
+        editorHeader.setAlignment(Pos.CENTER_LEFT);
         title.setPromptText("Titre");
         title.setTextFormatter(new TextFormatter<String>(change ->
                 change.getControlNewText().length() <= SlideCollection.MAX_TITLE_LENGTH ? change : null));
+        title.textProperty().addListener((ignored, oldValue, value) -> {
+            editorHeading.setText(value.isBlank() ? "Nouveau carrousel" : value);
+            updateEditorMetadata();
+        });
         description.setPromptText("Description (facultative)");
         description.setPrefRowCount(2);
         year.setPromptText("Année (facultative)");
+        year.textProperty().addListener((ignored, oldValue, value) -> updateEditorMetadata());
 
         var titleField = labelledField("Titre", title);
         var yearField = labelledField("Année", year);
@@ -171,28 +207,52 @@ public final class AdminWindow extends Application {
         var firstRow = new HBox(12, titleField, yearField);
         HBox.setHgrow(titleField, Priority.ALWAYS);
         var descriptionField = labelledField("Description", description);
+        metadataForm = new VBox(12, firstRow, descriptionField);
+        metadataForm.getStyleClass().add("metadata-form");
+        metadataForm.setVisible(false);
+        metadataForm.setManaged(false);
+        editInfoButton.setOnAction(event -> {
+            var visible = !metadataForm.isVisible();
+            metadataForm.setVisible(visible);
+            metadataForm.setManaged(visible);
+            editInfoButton.setText(visible ? "Masquer les informations" : "Modifier les informations");
+        });
 
-        preview.setFitWidth(110);
-        preview.setFitHeight(150);
+        preview.setFitWidth(236);
+        preview.setFitHeight(190);
         preview.setPreserveRatio(true);
         preview.setSmooth(true);
         var previewBox = new BorderPane(preview);
-        previewBox.setMinHeight(170);
+        previewBox.setMinSize(220, 170);
+        previewBox.setPrefSize(260, 210);
+        previewBox.setMaxSize(320, 260);
         previewBox.getStyleClass().add("preview-box");
         BorderPane.setAlignment(preview, Pos.CENTER);
+        previewFilename.getStyleClass().add("preview-filename");
+        previewPosition.getStyleClass().add("preview-metadata");
+        var inspector = new VBox(10, previewBox, previewFilename, previewPosition);
+        inspector.getStyleClass().add("inspector-pane");
+        inspector.setMinWidth(220);
+        inspector.setPrefWidth(260);
+        inspector.setMaxWidth(340);
+        inspector.widthProperty().addListener((ignored, oldWidth, width) ->
+                preview.setFitWidth(Math.max(196, width.doubleValue() - 24)));
 
         var normalMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount.svg.png")));
         var selectedMount = new Image(Objects.requireNonNull(getClass().getResourceAsStream("/slide-mount-selected.svg.png")));
         imageGrid = new SlideGridView(selectedImages, normalMount, selectedMount);
         imageGrid.setOnSelection(index -> {
-            showPreview(index >= 0 && index < selectedImages.size() ? selectedImages.get(index) : null);
+            var path = index >= 0 && index < selectedImages.size() ? selectedImages.get(index) : null;
+            showPreview(path);
+            previewFilename.setText(path == null ? "Sélectionnez une diapositive" : path.getFileName().toString());
+            previewPosition.setText(path == null ? "" : "Diapositive " + (index + 1) + " sur " + selectedImages.size());
             updateImageActions();
         });
         selectedImages.addListener((javafx.collections.ListChangeListener<Path>) ignored -> {
-            updateImageCount();
+            updateEditorMetadata();
             updateImageActions();
         });
-        updateImageCount();
+        updateEditorMetadata();
         updateImageActions();
         VBox.setVgrow(imageGrid, Priority.ALWAYS);
 
@@ -204,15 +264,17 @@ public final class AdminWindow extends Application {
         upButton.getStyleClass().add("secondary-button");
         downButton.getStyleClass().add("secondary-button");
         removeButton.getStyleClass().add("danger-button");
-        imageCount.getStyleClass().add("count-chip");
-        var imageActions = new HBox(8, chooseButton, upButton, downButton, removeButton, imageCount);
+        var imageActions = new HBox(8, chooseButton, removeButton, upButton, downButton);
         imageActions.setAlignment(Pos.CENTER_LEFT);
 
         saveButton.setDefaultButton(true);
         saveButton.getStyleClass().add("primary-button");
         saveButton.setOnAction(event -> saveCollection());
-        resetButton.setOnAction(event -> clearForm());
-        resetButton.setText("Réinitialiser");
+        resetButton.setOnAction(event -> {
+            if (editedCollection == null) clearForm();
+            else edit(editedCollection);
+        });
+        resetButton.setText("Annuler les modifications");
         resetButton.getStyleClass().add("secondary-button");
         deleteButton.setDisable(true);
         deleteButton.setOnAction(event -> deleteCollection());
@@ -228,17 +290,96 @@ public final class AdminWindow extends Application {
         footer.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(status, Priority.ALWAYS);
 
-        var listPane = new VBox(imageGrid);
+        var listPane = new VBox(12, imageGrid, imageActions);
         HBox.setHgrow(listPane, Priority.ALWAYS);
-        var mediaPane = new HBox(14, listPane, previewBox);
+        VBox.setVgrow(imageGrid, Priority.ALWAYS);
+        var mediaPane = new HBox(18, listPane, inspector);
         HBox.setHgrow(listPane, Priority.ALWAYS);
         VBox.setVgrow(mediaPane, Priority.ALWAYS);
-        previewBox.setPrefWidth(120);
-        var pane = new VBox(14, editorTitles, firstRow, descriptionField,
-                new Separator(Orientation.HORIZONTAL), imageActions, mediaPane, footer);
-        pane.getStyleClass().addAll("surface-card", "editor-card");
-        pane.setMinWidth(400);
+        var pane = new VBox(14, editorHeader, metadataForm,
+                new Separator(Orientation.HORIZONTAL), mediaPane, footer);
+        pane.getStyleClass().addAll("surface-card", "editor-view");
+        pane.widthProperty().addListener((ignored, oldWidth, width) -> {
+            var inspectorWidth = Math.max(220, Math.min(320, width.doubleValue() * 0.25));
+            inspector.setPrefWidth(inspectorWidth);
+            previewBox.setPrefWidth(inspectorWidth - 24);
+        });
+        pane.heightProperty().addListener((ignored, oldHeight, height) -> {
+            var previewHeight = Math.max(170, Math.min(260, height.doubleValue() * 0.34));
+            previewBox.setPrefHeight(previewHeight);
+            preview.setFitHeight(previewHeight - 20);
+        });
+        pane.setOnKeyPressed(event -> {
+            if (event.getCode() == KeyCode.ESCAPE) {
+                requestCatalogReturn();
+                event.consume();
+            }
+        });
         return pane;
+    }
+
+    private void showCatalog() {
+        if (catalogView == null || editorView == null) return;
+        catalogView.setVisible(true);
+        catalogView.setManaged(true);
+        editorView.setVisible(false);
+        editorView.setManaged(false);
+    }
+
+    private void requestCatalogReturn() {
+        if (busy) return;
+        if (!hasUnsavedChanges()) {
+            showCatalog();
+            return;
+        }
+        var save = new ButtonType("Enregistrer", ButtonBar.ButtonData.YES);
+        var discard = new ButtonType("Ignorer", ButtonBar.ButtonData.NO);
+        var confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                "Des modifications n’ont pas encore été enregistrées.",
+                save, discard, ButtonType.CANCEL);
+        confirmation.setHeaderText("Revenir à mes carrousels ?");
+        confirmation.initOwner(status.getScene().getWindow());
+        confirmation.initModality(Modality.WINDOW_MODAL);
+        var choice = confirmation.showAndWait().orElse(ButtonType.CANCEL);
+        if (choice == save) {
+            returnToCatalogAfterSave = true;
+            saveCollection();
+        } else if (choice == discard) {
+            returnToCatalogAfterSave = false;
+            showCatalog();
+        }
+    }
+
+    private boolean hasUnsavedChanges() {
+        if (editedCollection == null) {
+            return !title.getText().isBlank() || !description.getText().isBlank()
+                    || !year.getText().isBlank() || !selectedImages.isEmpty();
+        }
+        var savedDescription = editedCollection.description() == null ? "" : editedCollection.description();
+        var savedYear = editedCollection.year() == null ? "" : editedCollection.year().toString();
+        var savedImages = editedCollection.slides().stream()
+                .map(slide -> importer.storedImagePath(slide.id()))
+                .toList();
+        return !Objects.equals(title.getText(), editedCollection.title())
+                || !Objects.equals(description.getText(), savedDescription)
+                || !Objects.equals(year.getText().trim(), savedYear)
+                || !selectedImages.equals(savedImages);
+    }
+
+    private void showInformationForm() {
+        metadataForm.setVisible(true);
+        metadataForm.setManaged(true);
+        editInfoButton.setText("Masquer les informations");
+    }
+
+    private void showEditor(boolean showInformationForm) {
+        catalogView.setVisible(false);
+        catalogView.setManaged(false);
+        editorView.setVisible(true);
+        editorView.setManaged(true);
+        metadataForm.setVisible(showInformationForm);
+        metadataForm.setManaged(showInformationForm);
+        editInfoButton.setText(showInformationForm ? "Masquer les informations" : "Modifier les informations");
     }
 
     private VBox labelledField(String labelText, javafx.scene.Node field) {
@@ -287,6 +428,8 @@ public final class AdminWindow extends Application {
                 imageGrid.select(Math.min(index, selectedImages.size() - 1));
             } else {
                 preview.setImage(null);
+                previewFilename.setText("Sélectionnez une diapositive");
+                previewPosition.setText("");
             }
         }
     }
@@ -296,16 +439,19 @@ public final class AdminWindow extends Application {
     }
 
     private void saveCollection() {
+        if (busy) return;
         final Integer parsedYear;
         try {
             parsedYear = year.getText().isBlank() ? null : Integer.valueOf(year.getText().trim());
         } catch (NumberFormatException exception) {
             status.setText("L’année doit être un nombre.");
+            showInformationForm();
             year.requestFocus();
             return;
         }
         if (title.getText().isBlank()) {
             status.setText("Le titre est obligatoire.");
+            showInformationForm();
             title.requestFocus();
             return;
         }
@@ -334,9 +480,12 @@ public final class AdminWindow extends Application {
             var saved = task.getValue();
             refreshCollections(saved.id());
             status.setText("Collection « " + saved.title() + " » enregistrée.");
+            if (returnToCatalogAfterSave) showCatalog();
+            returnToCatalogAfterSave = false;
         });
         task.setOnFailed(event -> {
             setBusy(false);
+            returnToCatalogAfterSave = false;
             showOperationError("L’enregistrement a échoué", task.getException());
         });
         var thread = new Thread(task, "virtualdiapo-import");
@@ -345,6 +494,7 @@ public final class AdminWindow extends Application {
     }
 
     private void setBusy(boolean busy) {
+        this.busy = busy;
         collectionGrid.setDisable(busy);
         title.setDisable(busy);
         description.setDisable(busy);
@@ -354,6 +504,8 @@ public final class AdminWindow extends Application {
         resetButton.setDisable(busy);
         chooseButton.setDisable(busy);
         newButton.setDisable(busy);
+        backButton.setDisable(busy);
+        editInfoButton.setDisable(busy);
         progress.setVisible(busy);
         progress.setManaged(busy);
         if (busy) {
@@ -367,8 +519,10 @@ public final class AdminWindow extends Application {
         }
     }
 
-    private void updateImageCount() {
-        imageCount.setText(selectedImages.size() + (selectedImages.size() > 1 ? " images" : " image"));
+    private void updateEditorMetadata() {
+        var count = selectedImages.size();
+        var yearSuffix = year.getText().isBlank() ? "" : "  ·  " + year.getText().trim();
+        editorMetadata.setText(count + (count > 1 ? " diapositives" : " diapositive") + yearSuffix);
     }
 
     private void updateImageActions() {
@@ -407,6 +561,8 @@ public final class AdminWindow extends Application {
         year.clear();
         selectedImages.clear();
         preview.setImage(null);
+        previewFilename.setText("Sélectionnez une diapositive");
+        previewPosition.setText("");
     }
 
     private void edit(SlideCollection collection) {
@@ -424,6 +580,8 @@ public final class AdminWindow extends Application {
                 .toList());
         if (selectedImages.isEmpty()) {
             preview.setImage(null);
+            previewFilename.setText("Sélectionnez une diapositive");
+            previewPosition.setText("");
         } else {
             imageGrid.select(0);
         }
@@ -451,6 +609,7 @@ public final class AdminWindow extends Application {
             }
             clearForm();
             refreshCollections();
+            showCatalog();
             status.setText("Collection « " + deletedTitle + " » supprimée.");
         } catch (Exception exception) {
             showOperationError("La suppression a échoué", exception);

@@ -139,6 +139,25 @@
 
 .secondary-button:hover { -fx-background-color: #e9e5de; }
 
+.back-button {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-text-fill: #5d5750;
+    -fx-padding: 7px 8px;
+}
+
+.back-button:hover {
+    -fx-background-color: #f3f1ed;
+}
+
+.metadata-form {
+    -fx-background-color: #faf9f7;
+    -fx-background-radius: 7px;
+    -fx-border-color: #e8e3dc;
+    -fx-border-radius: 7px;
+    -fx-padding: 12px;
+}
+
 .add-button {
     -fx-background-color: #eaf3fa;
     -fx-border-color: #a8bfd4;
@@ -251,6 +270,27 @@
     -fx-background-color: #171512;
     -fx-background-radius: 6px;
     -fx-padding: 10px;
+}
+
+.inspector-pane {
+    -fx-background-color: #faf9f7;
+    -fx-background-radius: 7px;
+    -fx-border-color: #e8e3dc;
+    -fx-border-radius: 7px;
+    -fx-padding: 12px;
+    -fx-alignment: top-left;
+}
+
+.preview-filename {
+    -fx-text-fill: -vd-text;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+    -fx-text-overrun: ellipsis;
+}
+
+.preview-metadata {
+    -fx-text-fill: -vd-muted;
+    -fx-font-size: 11px;
 }
 
 .count-chip {
