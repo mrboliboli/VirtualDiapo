@@ -240,7 +240,7 @@
 .slide-card {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
-    -fx-padding: 4px;
+    -fx-padding: 8px;
     -fx-alignment: top-center;
 }
 
@@ -256,7 +256,7 @@
 
 .slide-number {
     -fx-text-fill: #5f5a54;
-    -fx-font-size: 11px;
+    -fx-font-size: 12px;
     -fx-font-weight: 600;
 }
 

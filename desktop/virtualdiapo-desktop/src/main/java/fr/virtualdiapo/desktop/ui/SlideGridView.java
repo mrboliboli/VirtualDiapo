@@ -28,7 +28,7 @@ import java.util.function.IntConsumer;
 
 final class SlideGridView extends ScrollPane {
     private final ObservableList<Path> items;
-    private final TilePane tiles = new TilePane(10, 10);
+    private final TilePane tiles = new TilePane(16, 16);
     private final ToggleGroup selection = new ToggleGroup();
     private final IntegerProperty selectedIndex = new SimpleIntegerProperty(-1);
     private final Image normalMount;
@@ -44,8 +44,8 @@ final class SlideGridView extends ScrollPane {
         getStyleClass().add("slide-grid-scroll");
         tiles.getStyleClass().add("slide-grid");
         tiles.setPadding(new Insets(2));
-        tiles.setPrefTileWidth(92);
-        tiles.setPrefTileHeight(112);
+        tiles.setPrefTileWidth(184);
+        tiles.setPrefTileHeight(224);
         setContent(tiles);
         setFitToWidth(true);
         setHbarPolicy(ScrollBarPolicy.NEVER);
@@ -98,21 +98,21 @@ final class SlideGridView extends ScrollPane {
     private ToggleButton createCard(int index) {
         var path = items.get(index);
         var photo = new ImageView();
-        photo.setFitWidth(33);
-        photo.setFitHeight(33);
+        photo.setFitWidth(66);
+        photo.setFitHeight(66);
         photo.setPreserveRatio(false);
         photo.setSmooth(true);
         setSquareImage(photo, new Image(path.toUri().toString(), true));
         var mount = new ImageView(normalMount);
-        mount.setFitWidth(82);
-        mount.setFitHeight(82);
+        mount.setFitWidth(164);
+        mount.setFitHeight(164);
         mount.setPreserveRatio(true);
         mount.setSmooth(true);
         var composition = new StackPane(mount, photo);
         composition.getStyleClass().add("slide-composition");
         var number = new Label(Integer.toString(index + 1));
         number.getStyleClass().add("slide-number");
-        var content = new VBox(5, composition, number);
+        var content = new VBox(10, composition, number);
         content.setAlignment(Pos.TOP_CENTER);
 
         var card = new ToggleButton();
@@ -134,7 +134,8 @@ final class SlideGridView extends ScrollPane {
                 moveSelected(1);
                 event.consume();
             } else if (!event.isAltDown()) {
-                var columns = Math.max(1, (int) ((tiles.getWidth() + tiles.getHgap())
+                var horizontalPadding = tiles.getPadding().getLeft() + tiles.getPadding().getRight();
+                var columns = Math.max(1, (int) ((tiles.getWidth() - horizontalPadding + tiles.getHgap())
                         / (tiles.getPrefTileWidth() + tiles.getHgap())));
                 var target = switch (event.getCode()) {
                     case LEFT -> indexOnCard - 1;
