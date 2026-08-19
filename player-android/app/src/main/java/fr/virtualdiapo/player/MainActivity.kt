@@ -5,12 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +32,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -39,8 +42,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -52,7 +53,8 @@ import fr.virtualdiapo.player.network.DiscoveryStatus
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.PreloadWindow
-import fr.virtualdiapo.player.projection.ProjectionOptions
+import fr.virtualdiapo.player.projection.ProjectionBeamGeometry
+import fr.virtualdiapo.player.projection.ProjectionDust
 import fr.virtualdiapo.player.projection.ProjectionPreferences
 import fr.virtualdiapo.player.projection.ProjectionState
 import fr.virtualdiapo.player.projection.ProjectionTransition
@@ -62,7 +64,6 @@ import fr.virtualdiapo.player.ui.CarouselHomeScreen
 import fr.virtualdiapo.player.ui.CarouselLoadingScreen
 import fr.virtualdiapo.player.ui.DiscoveryFailureScreen
 import fr.virtualdiapo.player.ui.DiscoveryScreen
-import fr.virtualdiapo.player.ui.ProjectionSettingsScreen
 import fr.virtualdiapo.player.ui.SplashScreen
 import fr.virtualdiapo.player.ui.theme.VirtualDiapoTheme
 import kotlinx.coroutines.delay
@@ -204,11 +205,8 @@ private fun ProjectionScreen(
     var projection by rememberSaveable(collection.id, stateSaver = projectionSaver) {
         mutableStateOf(ProjectionState.initial(slideCount))
     }
-    var options by remember { mutableStateOf(preferences.load()) }
+    val options = remember(collection.id) { preferences.load() }
     var initialPreparation by remember(collection.id) { mutableStateOf(projection is ProjectionState.LoadingFirstSlide) }
-    var navigationHintVisible by rememberSaveable(collection.id) { mutableStateOf(true) }
-    var settingsVisible by rememberSaveable { mutableStateOf(false) }
-    var selectedSetting by rememberSaveable { mutableIntStateOf(0) }
     var transitionJob by remember(collection.id) { mutableStateOf<Job?>(null) }
     val imageLoader = coil3.SingletonImageLoader.get(context)
     val displayMetrics = context.resources.displayMetrics
@@ -256,9 +254,14 @@ private fun ProjectionScreen(
         prepareAndRun(projection.beginMove(delta) ?: return)
     }
 
-    fun updateOptions(updated: ProjectionOptions) {
-        options = updated
-        preferences.save(updated)
+    val animateBeamDust = when (val state = projection) {
+        is ProjectionState.LoadingFirstSlide,
+        is ProjectionState.Transition,
+        is ProjectionState.EndOfCarousel,
+        -> true
+        is ProjectionState.Preparing ->
+            state.origin == null || state.origin == ProjectionState.Destination.End
+        is ProjectionState.Slide -> false
     }
 
     DisposableEffect(collection.id) {
@@ -279,34 +282,16 @@ private fun ProjectionScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
-                navigationHintVisible = false
-                if (settingsVisible) {
-                    when (event.key) {
-                        Key.DirectionUp -> selectedSetting = (selectedSetting - 1).coerceAtLeast(0)
-                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(1)
-                        Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
-                            if (selectedSetting == 0) {
-                                updateOptions(options.copy(soundEnabled = !options.soundEnabled))
-                            } else {
-                                updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
-                            }
-                        }
-                        Key.Back, Key.Menu -> settingsVisible = false
-                        else -> return@onPreviewKeyEvent false
-                    }
-                    return@onPreviewKeyEvent true
-                }
                 when (event.key) {
                     Key.DirectionRight, Key.Enter, Key.NumPadEnter, Key.MediaNext -> move(1)
                     Key.DirectionLeft, Key.MediaPrevious -> move(-1)
-                    Key.Menu, Key.DirectionDown -> settingsVisible = true
                     else -> return@onPreviewKeyEvent false
                 }
                 true
             },
         contentAlignment = Alignment.Center,
     ) {
-        ProjectionSurface()
+        ProjectionSurface(animateDust = animateBeamDust)
         ProjectionContent(
             projection = projection,
             preloader = preloader,
@@ -316,36 +301,10 @@ private fun ProjectionScreen(
         if (initialPreparation) {
             CarouselLoadingScreen(collection.title)
         }
-        if (!initialPreparation && navigationHintVisible && !settingsVisible) {
-            Text(
-                text = "↓  Réglages de projection",
-                color = Color(0xFFF5E7CF).copy(alpha = .66f),
-                fontSize = 15.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 36.dp),
-            )
-        }
-        if (settingsVisible) {
-            ProjectionSettingsScreen(
-                soundEnabled = options.soundEnabled,
-                fadeEnabled = options.fadeEnabled,
-                selectedIndex = selectedSetting,
-                onSoundChanged = { updateOptions(options.copy(soundEnabled = it)) },
-                onFadeChanged = { updateOptions(options.copy(fadeEnabled = it)) },
-            )
-        }
     }
-    BackHandler(enabled = settingsVisible) { settingsVisible = false }
     LaunchedEffect(collection.id) {
         projectionFocus.requestFocus()
         prepareAndRun(projection.beginInitialLoad() ?: return@LaunchedEffect)
-    }
-    LaunchedEffect(initialPreparation) {
-        if (!initialPreparation) {
-            delay(4_500L)
-            navigationHintVisible = false
-        }
     }
 }
 
@@ -368,7 +327,7 @@ private fun ProjectionContent(
             }
         }
         val origin = projection.origin as? ProjectionState.Destination.Slide
-        if (origin != null && elapsedMs <= 140L) {
+        if (origin != null) {
             ProjectionSlide(
                 index = origin.index,
                 transform = ProjectionTransition.outgoing(elapsedMs, projection.direction, fadeEnabled),
@@ -377,7 +336,7 @@ private fun ProjectionContent(
             )
         }
         val destination = projection.destination as? ProjectionState.Destination.Slide
-        if (destination != null && elapsedMs >= ProjectionTransition.ENTRY_START_MS) {
+        if (destination != null) {
             ProjectionSlide(
                 index = destination.index,
                 transform = ProjectionTransition.incoming(elapsedMs, projection.direction, fadeEnabled),
@@ -390,7 +349,7 @@ private fun ProjectionContent(
     projection.visibleSlideIndex()?.let { index ->
         ProjectionSlide(
             index = index,
-            transform = SlideTransform(0f, 0f, 0f, 1f, 1f),
+            transform = SlideTransform(translationXFactor = 0f, photoAlpha = 1f),
             preloader = preloader,
             imageLoader = imageLoader,
         )
@@ -404,48 +363,105 @@ private fun ProjectionSlide(
     preloader: SlidePreloader,
     imageLoader: coil3.ImageLoader,
 ) {
-    AsyncImage(
-        model = preloader.request(index),
-        contentDescription = null,
-        imageLoader = imageLoader,
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                translationX = transform.translationXFactor * density
-                translationY = transform.translationYFactor * density
-                rotationZ = transform.rotationZ
-                scaleX = transform.scale
-                scaleY = transform.scale
-                alpha = transform.alpha
-            },
-        contentScale = ContentScale.Fit,
-    )
+                translationX = transform.translationXFactor * size.width
+            }
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = preloader.request(index),
+            contentDescription = null,
+            imageLoader = imageLoader,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = transform.photoAlpha },
+            contentScale = ContentScale.Fit,
+        )
+    }
 }
 
 @Composable
-private fun ProjectionSurface() {
+private fun ProjectionSurface(animateDust: Boolean) {
+    val dustPhase = remember { Animatable(0f) }
+    LaunchedEffect(animateDust) {
+        if (!animateDust) {
+            dustPhase.snapTo(0f)
+            return@LaunchedEffect
+        }
+        while (true) {
+            dustPhase.snapTo(0f)
+            dustPhase.animateTo(1f, tween(durationMillis = 8_000, easing = LinearEasing))
+        }
+    }
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color(0xFFD8C5A3))
-            .background(
-                Brush.radialGradient(
+            .drawWithCache {
+                val gradientCenter = Offset(size.width / 2f, size.height / 2f)
+                val gradientRadius = ProjectionBeamGeometry.radius(size.width, size.height)
+                val haloRadius = ProjectionBeamGeometry.haloRadius(size.width, size.height)
+                val dust = ProjectionDust.generate(size.width, size.height)
+                val beam = Brush.radialGradient(
                     colorStops = arrayOf(
-                        0f to Color(0xFFF5E8CF),
-                        .55f to Color(0xFFE7D6B8),
-                        1f to Color(0xFFB8A17D),
+                        0f to Color(0xFFF1F1ED),
+                        .32f to Color(0xFFF2F2EE),
+                        .62f to Color(0xFFECECE8),
+                        .82f to Color(0xFFDFDFDB),
+                        1f to Color(0xFFC9C9C5),
                     ),
-                ),
-            )
-            .background(
-                Brush.radialGradient(
+                    center = gradientCenter,
+                    radius = gradientRadius,
+                )
+                val halo = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0f to Color.White.copy(alpha = .58f),
+                        .12f to Color.White.copy(alpha = .42f),
+                        .32f to Color(0xFFFFFEFC).copy(alpha = .20f),
+                        .55f to Color(0xFFFFFEFC).copy(alpha = .08f),
+                        .78f to Color(0xFFFFFEFC).copy(alpha = .02f),
+                        1f to Color.Transparent,
+                    ),
+                    center = gradientCenter,
+                    radius = haloRadius,
+                )
+                val vignette = Brush.radialGradient(
                     colorStops = arrayOf(
                         0f to Color.Transparent,
                         .72f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = .22f),
+                        .90f to Color.Black.copy(alpha = .07f),
+                        1f to Color.Black.copy(alpha = .18f),
                     ),
-                ),
-            )
-            .background(Color(0xFFE8A84C).copy(alpha = .035f)),
+                    center = gradientCenter,
+                    radius = gradientRadius,
+                )
+                onDrawBehind {
+                    drawRect(Color(0xFFDEDEDA))
+                    drawRect(beam)
+                    drawRect(halo)
+                    val phase = dustPhase.value
+                    dust.forEach { particle ->
+                        val center = Offset(
+                            x = particle.x + ProjectionDust.offsetX(particle, phase) * density,
+                            y = particle.y + ProjectionDust.offsetY(particle, phase) * density,
+                        )
+                        val radius = particle.radiusDp * density
+                        drawCircle(
+                            color = Color(0xFFFFFDF7).copy(alpha = particle.haloAlpha),
+                            radius = radius * 2.2f,
+                            center = center,
+                        )
+                        drawCircle(
+                            color = Color(0xFFFFFDF7).copy(alpha = particle.coreAlpha),
+                            radius = radius,
+                            center = center,
+                        )
+                    }
+                    drawRect(vignette)
+                }
+            },
     )
 }

@@ -1,5 +1,9 @@
 package fr.virtualdiapo.player.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,7 +49,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.group
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -67,7 +76,16 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import fr.virtualdiapo.player.R
 import fr.virtualdiapo.player.model.CollectionSummary
+import fr.virtualdiapo.player.projection.ProjectionOptions
+import fr.virtualdiapo.player.projection.ProjectionPreferences
 import fr.virtualdiapo.player.ui.theme.VirtualDiapoColors
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.delay
 
 private const val DISCOVERY_TIMEOUT_MS = 10_000L
@@ -182,8 +200,18 @@ fun CarouselHomeScreen(
     collections: List<CollectionSummary>,
     onOpen: (CollectionSummary) -> Unit,
 ) {
+    val context = LocalContext.current
+    val preferences = remember { ProjectionPreferences(context) }
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
+    var focusZone by rememberSaveable { mutableStateOf(CarouselFocusZone.CAROUSEL) }
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
+    var selectedSetting by rememberSaveable { mutableIntStateOf(0) }
+    var options by remember { mutableStateOf(preferences.load()) }
     val focus = remember { FocusRequester() }
+    fun updateOptions(updated: ProjectionOptions) {
+        options = updated
+        preferences.save(updated)
+    }
     selectedIndex = selectedIndex.coerceIn(collections.indices)
     BoxWithConstraints(
         modifier = Modifier
@@ -193,15 +221,60 @@ fun CarouselHomeScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+                if (settingsVisible) {
+                    when (event.key) {
+                        Key.DirectionUp -> selectedSetting = (selectedSetting - 1).coerceAtLeast(0)
+                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(1)
+                        Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                            if (selectedSetting == 0) {
+                                updateOptions(options.copy(soundEnabled = !options.soundEnabled))
+                            } else {
+                                updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
+                            }
+                        }
+                        Key.Back -> settingsVisible = false
+                        else -> Unit
+                    }
+                    return@onPreviewKeyEvent true
+                }
+                if (focusZone == CarouselFocusZone.SETTINGS) {
+                    when (event.key) {
+                        Key.DirectionDown -> focusZone = moveCarouselFocus(
+                            focusZone,
+                            CarouselFocusDirection.DOWN,
+                        )
+                        Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                            selectedSetting = 0
+                            settingsVisible = true
+                        }
+                        Key.Back -> return@onPreviewKeyEvent false
+                        else -> Unit
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 when (event.key) {
                     Key.DirectionLeft -> selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
                     Key.DirectionRight -> selectedIndex = (selectedIndex + 1).coerceAtMost(collections.lastIndex)
                     Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> onOpen(collections[selectedIndex])
+                    Key.DirectionUp -> focusZone = moveCarouselFocus(
+                        focusZone,
+                        CarouselFocusDirection.UP,
+                    )
                     else -> return@onPreviewKeyEvent false
                 }
                 true
             },
     ) {
+        val viewportWidth = maxWidth
+        val viewportHeight = maxHeight
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (settingsVisible) Modifier.clearAndSetSemantics { }
+                    else Modifier,
+                ),
+        ) {
         Image(
             painterResource(R.drawable.tv_carousel_stage_background),
             contentDescription = null,
@@ -213,17 +286,31 @@ fun CarouselHomeScreen(
             color = VirtualDiapoColors.Cream,
             fontSize = 30.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = maxHeight * .055f),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = viewportHeight * .055f),
+        )
+        SettingsButton(
+            focused = focusZone == CarouselFocusZone.SETTINGS,
+            onClick = {
+                focusZone = CarouselFocusZone.SETTINGS
+                selectedSetting = 0
+                settingsVisible = true
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(
+                    end = maxOf(48.dp, viewportWidth * .05f),
+                    top = maxOf(32.dp, viewportHeight * .045f),
+                ),
         )
         RemoteInstructions(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = maxHeight * CarouselHomeLayout.INSTRUCTIONS_TOP_FRACTION),
+                .padding(top = viewportHeight * CarouselHomeLayout.INSTRUCTIONS_TOP_FRACTION),
         )
-        val sideWidth = (maxWidth * CarouselHomeLayout.SIDE_WIDTH_FRACTION)
+        val sideWidth = (viewportWidth * CarouselHomeLayout.SIDE_WIDTH_FRACTION)
             .coerceIn(CarouselHomeLayout.MIN_SIDE_WIDTH, CarouselHomeLayout.MAX_SIDE_WIDTH)
         val centerWidth = sideWidth * CarouselHomeLayout.CENTER_SCALE
-        val gap = (maxWidth * CarouselHomeLayout.GAP_FRACTION).coerceAtMost(CarouselHomeLayout.MAX_GAP)
+        val gap = (viewportWidth * CarouselHomeLayout.GAP_FRACTION).coerceAtMost(CarouselHomeLayout.MAX_GAP)
         Row(
             modifier = Modifier
                 .fillMaxWidth(CarouselHomeLayout.SAFE_WIDTH_FRACTION)
@@ -247,8 +334,94 @@ fun CarouselHomeScreen(
                 CarouselDisplay(it, CarouselPosition.RIGHT, sideWidth, Modifier.offset(y = CarouselHomeLayout.sideOffset(sideWidth)))
             } ?: Spacer(Modifier.width(sideWidth))
         }
+        }
+        if (settingsVisible) {
+            ProjectionSettingsScreen(
+                soundEnabled = options.soundEnabled,
+                fadeEnabled = options.fadeEnabled,
+                selectedIndex = selectedSetting,
+                onSoundChanged = { updateOptions(options.copy(soundEnabled = it)) },
+                onFadeChanged = { updateOptions(options.copy(fadeEnabled = it)) },
+            )
+        }
     }
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    BackHandler(enabled = settingsVisible) { settingsVisible = false }
+    LaunchedEffect(Unit) {
+        focusZone = CarouselFocusZone.CAROUSEL
+        focus.requestFocus()
+    }
+}
+
+@Composable
+private fun SettingsButton(
+    focused: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.06f else 1f,
+        animationSpec = tween(120, easing = FastOutSlowInEasing),
+        label = "Focus réglages",
+    )
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Réglages de projection"
+                role = Role.Button
+                onClick(label = "Ouvrir les réglages de projection") {
+                    onClick()
+                    true
+                }
+            }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .background(
+                if (focused) Color(0xFF15171A).copy(alpha = .88f) else Color.Black.copy(alpha = .28f),
+                RoundedCornerShape(10.dp),
+            )
+            .border(
+                if (focused) 2.dp else 1.dp,
+                if (focused) VirtualDiapoColors.Amber else VirtualDiapoColors.Champagne.copy(alpha = .28f),
+                RoundedCornerShape(10.dp),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = SettingsIcon,
+            contentDescription = null,
+            tint = VirtualDiapoColors.Cream.copy(alpha = if (focused) 1f else .72f),
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+private val SettingsIcon: ImageVector by lazy {
+    ImageVector.Builder("Settings", 24.dp, 24.dp, 24f, 24f).apply {
+        group(translationX = -1f) {
+        path(fill = SolidColor(Color.Black)) {
+            moveTo(19.43f, 12.98f)
+            curveTo(19.47f, 12.66f, 19.5f, 12.34f, 19.5f, 12f)
+            curveTo(19.5f, 11.66f, 19.47f, 11.33f, 19.42f, 11.02f)
+            lineTo(21.54f, 9.37f); lineTo(19.54f, 5.91f); lineTo(17.05f, 6.91f)
+            curveTo(16.54f, 6.51f, 15.98f, 6.18f, 15.37f, 5.93f)
+            lineTo(15f, 3.27f); lineTo(11f, 3.27f); lineTo(10.63f, 5.93f)
+            curveTo(10.02f, 6.18f, 9.46f, 6.51f, 8.95f, 6.91f)
+            lineTo(6.46f, 5.91f); lineTo(4.46f, 9.37f); lineTo(6.58f, 11.02f)
+            curveTo(6.53f, 11.33f, 6.5f, 11.66f, 6.5f, 12f)
+            curveTo(6.5f, 12.34f, 6.53f, 12.66f, 6.58f, 12.98f)
+            lineTo(4.46f, 14.63f); lineTo(6.46f, 18.09f); lineTo(8.95f, 17.09f)
+            curveTo(9.46f, 17.49f, 10.02f, 17.82f, 10.63f, 18.07f)
+            lineTo(11f, 20.73f); lineTo(15f, 20.73f); lineTo(15.37f, 18.07f)
+            curveTo(15.98f, 17.82f, 16.54f, 17.49f, 17.05f, 17.09f)
+            lineTo(19.54f, 18.09f); lineTo(21.54f, 14.63f); close()
+            moveTo(13f, 15.5f)
+            curveTo(11.07f, 15.5f, 9.5f, 13.93f, 9.5f, 12f)
+            curveTo(9.5f, 10.07f, 11.07f, 8.5f, 13f, 8.5f)
+            curveTo(14.93f, 8.5f, 16.5f, 10.07f, 16.5f, 12f)
+            curveTo(16.5f, 13.93f, 14.93f, 15.5f, 13f, 15.5f); close()
+        }
+        }
+    }.build()
 }
 
 @Composable
@@ -444,10 +617,19 @@ fun ProjectionSettingsScreen(
     onSoundChanged: (Boolean) -> Unit,
     onFadeChanged: (Boolean) -> Unit,
 ) {
-    CinematicBackground {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = .58f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        val cardWidth = (maxWidth * .52f).coerceAtMost(760.dp)
         Column(
-            modifier = Modifier.fillMaxWidth(.55f),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            modifier = Modifier
+                .width(cardWidth)
+                .background(Color(0xFF101216).copy(alpha = .96f), RoundedCornerShape(14.dp))
+                .border(1.dp, VirtualDiapoColors.WarmSlate, RoundedCornerShape(14.dp))
+                .padding(horizontal = 32.dp, vertical = 28.dp),
         ) {
             Text(
                 "Réglages de projection",
@@ -455,18 +637,21 @@ fun ProjectionSettingsScreen(
                 fontSize = 28.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+            Spacer(Modifier.height(24.dp))
             ProjectionSettingRow(
                 label = "Son de transition",
                 checked = soundEnabled,
                 selected = selectedIndex == 0,
                 onChanged = onSoundChanged,
             )
+            Spacer(Modifier.height(16.dp))
             ProjectionSettingRow(
                 label = "Fondu entre les diapositives",
                 checked = fadeEnabled,
                 selected = selectedIndex == 1,
                 onChanged = onFadeChanged,
             )
+            Spacer(Modifier.height(22.dp))
             Text(
                 "↑ ↓ choisir   •   OK modifier   •   Retour fermer",
                 color = VirtualDiapoColors.Cream.copy(alpha = .66f),

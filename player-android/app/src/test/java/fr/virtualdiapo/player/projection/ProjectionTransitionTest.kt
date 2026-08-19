@@ -5,34 +5,101 @@ import org.junit.Test
 
 class ProjectionTransitionTest {
     @Test
-    fun outgoing_shouldUsePrescribedFinalTransform_whenMovingForward() {
+    fun outgoing_shouldTravelPastViewport_whenMovingForward() {
         // WHEN
-        val transform = ProjectionTransition.outgoing(140L, direction = 1, fadeEnabled = true)
+        val transform = ProjectionTransition.outgoing(
+            ProjectionTransition.TOTAL_DURATION_MS,
+            direction = 1,
+            fadeEnabled = true,
+        )
 
         // THEN
-        assertEquals(-12f, transform.translationXFactor, .02f)
-        assertEquals(8f, transform.translationYFactor, .02f)
-        assertEquals(-.16f, transform.rotationZ, .002f)
-        assertEquals(.992f, transform.scale, .0002f)
-        assertEquals(0f, transform.alpha, 0f)
+        assertEquals(-1.08f, transform.translationXFactor, .002f)
+        assertEquals(0f, transform.photoAlpha, .00001f)
     }
 
     @Test
     fun incoming_shouldReverseDirection_whenMovingBackward() {
         // WHEN
-        val transform = ProjectionTransition.incoming(ProjectionTransition.ENTRY_START_MS, -1, true)
+        val transform = ProjectionTransition.incoming(
+            ProjectionTransition.MOVEMENT_START_MS,
+            direction = -1,
+            fadeEnabled = true,
+        )
 
         // THEN
-        assertEquals(-12f, transform.translationXFactor, .02f)
-        assertEquals(-8f, transform.translationYFactor, .02f)
-        assertEquals(-.16f, transform.rotationZ, .002f)
-        assertEquals(0f, transform.alpha, 0f)
+        assertEquals(-1.08f, transform.translationXFactor, .002f)
+        assertEquals(0f, transform.photoAlpha, .00001f)
     }
 
     @Test
     fun transforms_shouldRemainOpaque_whenFadeIsDisabled() {
-        assertEquals(1f, ProjectionTransition.outgoing(130L, 1, false).alpha, 0f)
-        assertEquals(1f, ProjectionTransition.incoming(1_650L, 1, false).alpha, 0f)
+        assertEquals(1f, ProjectionTransition.outgoing(1_900L, 1, false).photoAlpha, 0f)
+        assertEquals(1f, ProjectionTransition.incoming(1_450L, 1, false).photoAlpha, 0f)
+    }
+
+    @Test
+    fun plates_shouldExposeCanonicalGap_atSoundClick() {
+        val outgoing = ProjectionTransition.outgoing(ProjectionTransition.SOUND_CLICK_MS, 1, false)
+        val incoming = ProjectionTransition.incoming(ProjectionTransition.SOUND_CLICK_MS, 1, false)
+        val gapWidthFactor = incoming.translationXFactor - outgoing.translationXFactor - 1f
+
+        assertEquals(-.54f, outgoing.translationXFactor, .002f)
+        assertEquals(.54f, incoming.translationXFactor, .002f)
+        assertEquals(.08f, gapWidthFactor, .002f)
+    }
+
+    @Test
+    fun beamRadius_shouldUseSeventyEightPercentOfViewportDiagonal() {
+        assertEquals(1_560f, ProjectionBeamGeometry.radius(width = 1_600f, height = 1_200f), .01f)
+    }
+
+    @Test
+    fun haloRadius_shouldUseTwentySixPercentOfSmallestViewportDimension() {
+        assertEquals(280.8f, ProjectionBeamGeometry.haloRadius(width = 1_920f, height = 1_080f), .01f)
+    }
+
+    @Test
+    fun dustCount_shouldScaleWithAreaAndRemainBounded() {
+        assertEquals(14, ProjectionDust.count(width = 1_920f, height = 1_080f))
+        assertEquals(10, ProjectionDust.count(width = 640f, height = 360f))
+        assertEquals(20, ProjectionDust.count(width = 3_840f, height = 2_160f))
+    }
+
+    @Test
+    fun dustGeneration_shouldBeDeterministicAndRespectVisualLimits() {
+        val first = ProjectionDust.generate(width = 1_920f, height = 1_080f)
+        val second = ProjectionDust.generate(width = 1_920f, height = 1_080f)
+
+        assertEquals(first, second)
+        assertEquals(14, first.size)
+        assertEquals(true, first.all { it.x in 0f..1_920f && it.y in 0f..1_080f })
+        assertEquals(true, first.all { it.radiusDp in .55f..1.6f })
+        assertEquals(true, first.all { it.coreAlpha in .045f..085f })
+        assertEquals(true, first.all { it.haloAlpha in .010f..018f })
+        assertEquals(true, first.count { it.radiusDp == 1.6f } <= 1)
+        assertEquals(
+            true,
+            first.drop(10).all { particle ->
+                ProjectionDust.ellipseValue(particle.x, particle.y, 1_920f, 1_080f) >= 1f
+            },
+        )
+    }
+
+    @Test
+    fun dustOffsets_shouldJoinContinuously_betweenEndAndStartOfCycle() {
+        val particle = ProjectionDust.generate(width = 1_920f, height = 1_080f).first()
+
+        assertEquals(
+            ProjectionDust.offsetX(particle, phase = 0f),
+            ProjectionDust.offsetX(particle, phase = 1f),
+            .0001f,
+        )
+        assertEquals(
+            ProjectionDust.offsetY(particle, phase = 0f),
+            ProjectionDust.offsetY(particle, phase = 1f),
+            .0001f,
+        )
     }
 
     @Test
