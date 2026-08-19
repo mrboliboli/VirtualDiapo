@@ -50,6 +50,10 @@ import coil3.compose.AsyncImage
 import fr.virtualdiapo.player.model.SlideCollection
 import fr.virtualdiapo.player.network.DiscoveredServer
 import fr.virtualdiapo.player.network.DiscoveryStatus
+import fr.virtualdiapo.player.network.ServerMode
+import fr.virtualdiapo.player.network.ServerPreferences
+import fr.virtualdiapo.player.network.ServerAddressValidator
+import fr.virtualdiapo.player.network.preferredServerAddress
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
 import fr.virtualdiapo.player.projection.PreloadWindow
@@ -112,9 +116,23 @@ private fun VirtualDiapoApp(
     retryDiscovery: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val serverPreferences = remember { ServerPreferences(context) }
+    var serverConfiguration by remember { mutableStateOf(serverPreferences.load()) }
     var splashFinished by rememberSaveable { mutableStateOf(false) }
     var discoveryTimedOut by rememberSaveable { mutableStateOf(false) }
     var retryKey by rememberSaveable { mutableIntStateOf(0) }
+
+    fun connectManually(enteredAddress: String) {
+        val normalized = ServerAddressValidator.normalize(enteredAddress) ?: return
+        val updated = serverConfiguration.copy(
+            mode = ServerMode.MANUAL,
+            manualAddress = normalized,
+        )
+        serverConfiguration = updated
+        serverPreferences.save(updated)
+        viewModel.connect(normalized)
+    }
 
     LaunchedEffect(Unit) {
         delay(SPLASH_DURATION_MS)
@@ -127,11 +145,26 @@ private fun VirtualDiapoApp(
 
     when (val current = state) {
         PlayerUiState.Setup -> {
-            val server = servers.firstOrNull()
-            LaunchedEffect(server?.address, retryKey) {
-                if (server != null) viewModel.connect(server.address)
+            val automaticAddress = servers.firstOrNull()?.address
+            val address = preferredServerAddress(serverConfiguration, automaticAddress)
+            LaunchedEffect(address, retryKey, serverConfiguration.mode) {
+                if (address != null) viewModel.connect(address)
             }
-            if (discoveryTimedOut || discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
+            if (serverConfiguration.mode == ServerMode.MANUAL && address == null) {
+                DiscoveryFailureScreen(
+                    message = "Adresse manuelle invalide. Indiquez une adresse avec son port.",
+                    initialAddress = serverConfiguration.manualAddress,
+                    onRetry = {},
+                    onConnect = ::connectManually,
+                )
+            } else if (serverConfiguration.mode == ServerMode.MANUAL) {
+                DiscoveryScreen(
+                    connecting = true,
+                    unavailable = false,
+                    retryKey = retryKey,
+                    onTimeout = {},
+                )
+            } else if (discoveryTimedOut || discoveryStatus == DiscoveryStatus.UNAVAILABLE) {
                 DiscoveryFailureScreen(
                     message = null,
                     initialAddress = "10.0.2.2:8080",
@@ -140,11 +173,11 @@ private fun VirtualDiapoApp(
                         retryKey++
                         retryDiscovery()
                     },
-                    onConnect = viewModel::connect,
+                    onConnect = ::connectManually,
                 )
             } else {
                 DiscoveryScreen(
-                    connecting = server != null,
+                    connecting = address != null,
                     unavailable = discoveryStatus == DiscoveryStatus.UNAVAILABLE,
                     retryKey = retryKey,
                     onTimeout = { discoveryTimedOut = true },
@@ -160,9 +193,18 @@ private fun VirtualDiapoApp(
         is PlayerUiState.LoadingCarousel -> CarouselLoadingScreen(current.title)
         is PlayerUiState.CollectionSelection -> {
             BackHandler(onBack = viewModel::returnToSetup)
-            CarouselHomeScreen(current.collections) { collection ->
-                viewModel.selectCollection(current.address, collection)
-            }
+            CarouselHomeScreen(
+                collections = current.collections,
+                activeAddress = current.address,
+                servers = servers,
+                discoveryStatus = discoveryStatus,
+                onConfigurationChanged = { configuration ->
+                    serverConfiguration = configuration
+                    serverPreferences.save(configuration)
+                },
+                onServerConnected = viewModel::connect,
+                onOpen = { collection -> viewModel.selectCollection(current.address, collection) },
+            )
         }
         is PlayerUiState.Failure -> DiscoveryFailureScreen(
             message = current.message,
@@ -173,7 +215,7 @@ private fun VirtualDiapoApp(
                 viewModel.returnToSetup()
                 retryDiscovery()
             },
-            onConnect = viewModel::connect,
+            onConnect = ::connectManually,
         )
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)

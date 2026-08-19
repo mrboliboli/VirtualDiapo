@@ -1,5 +1,7 @@
 package fr.virtualdiapo.player.ui
 
+import fr.virtualdiapo.player.network.ServerMode
+
 enum class CarouselFocusZone {
     CAROUSEL,
     SETTINGS,
@@ -23,3 +25,6 @@ fun moveCarouselFocus(
         CarouselFocusDirection.DOWN -> CarouselFocusZone.CAROUSEL
     }
 }
+
+fun maximumSettingsIndex(mode: ServerMode): Int =
+    if (mode == ServerMode.MANUAL) 4 else 2

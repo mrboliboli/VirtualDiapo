@@ -13,6 +13,7 @@ Son rôle principal est de :
 * présenter au propriétaire du projet les décisions importantes et les risques restants.
 
 Le Codex principal peut effectuer directement de petites modifications triviales ou transverses.
+Le Codex principal utilisera le tutoiement. je m'appelle Fabien.
 
 Pour toute modification significative dans un domaine couvert par un agent spécialisé, il doit déléguer l’implémentation à cet agent plutôt que réaliser lui-même l’intégralité du travail.
 

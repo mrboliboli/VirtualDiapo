@@ -1,5 +1,6 @@
 package fr.virtualdiapo.player.ui
 
+import fr.virtualdiapo.player.network.ServerMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -18,5 +19,11 @@ class CarouselFocusNavigationTest {
             CarouselFocusZone.CAROUSEL,
             moveCarouselFocus(CarouselFocusZone.SETTINGS, CarouselFocusDirection.DOWN),
         )
+    }
+
+    @Test
+    fun maximumSettingsIndex_shouldAdaptToServerMode() {
+        assertEquals(2, maximumSettingsIndex(ServerMode.MDNS))
+        assertEquals(4, maximumSettingsIndex(ServerMode.MANUAL))
     }
 }

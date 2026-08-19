@@ -14,6 +14,10 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 class VirtualDiapoApiClient {
+    suspend fun checkServer(address: String) = withContext(Dispatchers.IO) {
+        getJsonObject("${normalizeAddress(address)}/api/v1/server")
+        Unit
+    }
     suspend fun loadCollections(address: String): List<CollectionSummary> = withContext(Dispatchers.IO) {
         val baseUrl = normalizeAddress(address)
         val summaries = getJsonArray("$baseUrl/api/v1/collections")

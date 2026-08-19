@@ -7,3 +7,6 @@ player-android/.gradle/
 player-android/local.properties
 player-android/**/build/
 .aider*
+.agents
+.codex
+AGENTS.md

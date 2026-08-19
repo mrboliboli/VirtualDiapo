@@ -19,17 +19,20 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -38,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
@@ -78,15 +83,32 @@ import fr.virtualdiapo.player.R
 import fr.virtualdiapo.player.model.CollectionSummary
 import fr.virtualdiapo.player.projection.ProjectionOptions
 import fr.virtualdiapo.player.projection.ProjectionPreferences
+import fr.virtualdiapo.player.network.DiscoveredServer
+import fr.virtualdiapo.player.network.DiscoveryStatus
+import fr.virtualdiapo.player.network.ServerAddressValidator
+import fr.virtualdiapo.player.network.ServerConfiguration
+import fr.virtualdiapo.player.network.ServerMode
+import fr.virtualdiapo.player.network.ServerPreferences
+import fr.virtualdiapo.player.network.VirtualDiapoApiClient
+import fr.virtualdiapo.player.network.AvailabilityRequestPolicy
+import fr.virtualdiapo.player.network.AvailabilityRequestSnapshot
 import fr.virtualdiapo.player.ui.theme.VirtualDiapoColors
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.rememberCoroutineScope
 
 private const val DISCOVERY_TIMEOUT_MS = 10_000L
 private val CarouselLabelFont = FontFamily(Font(R.font.courier_prime_regular, FontWeight.Normal))
@@ -198,19 +220,104 @@ fun DiscoveryFailureScreen(
 @Composable
 fun CarouselHomeScreen(
     collections: List<CollectionSummary>,
+    activeAddress: String,
+    servers: List<DiscoveredServer>,
+    discoveryStatus: DiscoveryStatus,
+    onConfigurationChanged: (ServerConfiguration) -> Unit,
+    onServerConnected: (String) -> Unit,
     onOpen: (CollectionSummary) -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember { ProjectionPreferences(context) }
+    val serverPreferences = remember { ServerPreferences(context) }
+    val apiClient = remember { VirtualDiapoApiClient() }
+    val scope = rememberCoroutineScope()
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
     var focusZone by rememberSaveable { mutableStateOf(CarouselFocusZone.CAROUSEL) }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
     var selectedSetting by rememberSaveable { mutableIntStateOf(0) }
     var options by remember { mutableStateOf(preferences.load()) }
+    var serverConfiguration by remember { mutableStateOf(serverPreferences.load()) }
+    var manualAddress by remember { mutableStateOf(serverConfiguration.manualAddress) }
+    var availability by remember { mutableStateOf(ServerAvailability.NOT_TESTED) }
+    var availabilityJob by remember { mutableStateOf<Job?>(null) }
+    var availabilityGeneration by remember { mutableLongStateOf(0L) }
+    var manualEditing by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     fun updateOptions(updated: ProjectionOptions) {
         options = updated
         preferences.save(updated)
+    }
+    fun updateServerConfiguration(updated: ServerConfiguration) {
+        serverConfiguration = updated
+        serverPreferences.save(updated)
+        onConfigurationChanged(updated)
+    }
+    fun invalidateAvailability() {
+        availabilityGeneration++
+        availabilityJob?.cancel()
+        availabilityJob = null
+    }
+    fun effectiveMdnsTarget(): String? =
+        activeAddress.takeIf { address -> servers.any { it.address == address } }
+            ?: servers.firstOrNull()?.address
+    fun checkAddress(address: String, mode: ServerMode, reconnect: Boolean) {
+        invalidateAvailability()
+        val snapshot = AvailabilityRequestSnapshot(availabilityGeneration, mode, address)
+        availability = ServerAvailability.CHECKING
+        availabilityJob = scope.launch {
+            try {
+                apiClient.checkServer(address)
+                val currentTarget = when (mode) {
+                    ServerMode.MDNS -> effectiveMdnsTarget()
+                    ServerMode.MANUAL -> ServerAddressValidator.normalize(manualAddress)
+                }
+                if (!AvailabilityRequestPolicy.isCurrent(
+                        snapshot,
+                        availabilityGeneration,
+                        serverConfiguration.mode,
+                        currentTarget,
+                    )) return@launch
+                availability = ServerAvailability.AVAILABLE
+                if (reconnect) onServerConnected(address)
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (_: Exception) {
+                if (!AvailabilityRequestPolicy.isCurrent(
+                        snapshot,
+                        availabilityGeneration,
+                        serverConfiguration.mode,
+                        when (mode) {
+                            ServerMode.MDNS -> effectiveMdnsTarget()
+                            ServerMode.MANUAL -> ServerAddressValidator.normalize(manualAddress)
+                        },
+                    )) return@launch
+                availability = ServerAvailability.UNAVAILABLE
+            }
+        }
+    }
+    fun switchServerMode(target: ServerMode) {
+        invalidateAvailability()
+        updateServerConfiguration(serverConfiguration.copy(mode = target))
+        val targetAddress = when (target) {
+            ServerMode.MDNS -> effectiveMdnsTarget()
+            ServerMode.MANUAL -> ServerAddressValidator.normalize(manualAddress)
+        }
+        if (targetAddress == null) {
+            availability = ServerAvailability.NOT_TESTED
+            return
+        }
+        checkAddress(targetAddress, mode = target, reconnect = true)
+    }
+    fun saveAndTestManualAddress() {
+        val normalized = ServerAddressValidator.normalize(manualAddress) ?: return
+        manualAddress = normalized
+        updateServerConfiguration(
+            serverConfiguration.copy(mode = ServerMode.MANUAL, manualAddress = normalized),
+        )
+        manualEditing = false
+        focus.requestFocus()
+        checkAddress(normalized, mode = ServerMode.MANUAL, reconnect = true)
     }
     selectedIndex = selectedIndex.coerceIn(collections.indices)
     BoxWithConstraints(
@@ -222,17 +329,38 @@ fun CarouselHomeScreen(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
                 if (settingsVisible) {
+                    if (manualEditing) {
+                        if (event.key == Key.Back) {
+                            manualEditing = false
+                            focus.requestFocus()
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+                    val maximumIndex = maximumSettingsIndex(serverConfiguration.mode)
                     when (event.key) {
                         Key.DirectionUp -> selectedSetting = (selectedSetting - 1).coerceAtLeast(0)
-                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(1)
+                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(maximumIndex)
+                        Key.DirectionLeft, Key.DirectionRight -> if (selectedSetting == 2) {
+                            val mode = if (serverConfiguration.mode == ServerMode.MDNS) ServerMode.MANUAL else ServerMode.MDNS
+                            switchServerMode(mode)
+                        }
                         Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
-                            if (selectedSetting == 0) {
-                                updateOptions(options.copy(soundEnabled = !options.soundEnabled))
-                            } else {
-                                updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
+                            when (selectedSetting) {
+                                0 -> updateOptions(options.copy(soundEnabled = !options.soundEnabled))
+                                1 -> updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
+                                2 -> {
+                                    val mode = if (serverConfiguration.mode == ServerMode.MDNS) ServerMode.MANUAL else ServerMode.MDNS
+                                    switchServerMode(mode)
+                                }
+                                3 -> manualEditing = true
+                                4 -> saveAndTestManualAddress()
                             }
                         }
-                        Key.Back -> settingsVisible = false
+                        Key.Back -> {
+                            invalidateAvailability()
+                            settingsVisible = false
+                        }
                         else -> Unit
                     }
                     return@onPreviewKeyEvent true
@@ -340,12 +468,39 @@ fun CarouselHomeScreen(
                 soundEnabled = options.soundEnabled,
                 fadeEnabled = options.fadeEnabled,
                 selectedIndex = selectedSetting,
+                serverMode = serverConfiguration.mode,
+                manualAddress = manualAddress,
+                detectedAddress = effectiveMdnsTarget(),
+                discoveryStatus = discoveryStatus,
+                availability = availability,
+                manualEditing = manualEditing,
+                onManualEditingChanged = { manualEditing = it },
+                onManualDone = ::saveAndTestManualAddress,
+                onManualAddressChanged = {
+                    invalidateAvailability()
+                    manualAddress = it
+                    availability = ServerAvailability.NOT_TESTED
+                },
                 onSoundChanged = { updateOptions(options.copy(soundEnabled = it)) },
                 onFadeChanged = { updateOptions(options.copy(fadeEnabled = it)) },
             )
         }
     }
-    BackHandler(enabled = settingsVisible) { settingsVisible = false }
+    BackHandler(enabled = settingsVisible) {
+        if (manualEditing) {
+            manualEditing = false
+            focus.requestFocus()
+        } else {
+            invalidateAvailability()
+            settingsVisible = false
+        }
+    }
+    LaunchedEffect(settingsVisible, activeAddress, servers, discoveryStatus) {
+        val detected = effectiveMdnsTarget()
+        if (settingsVisible && serverConfiguration.mode == ServerMode.MDNS && detected != null) {
+            checkAddress(detected, mode = ServerMode.MDNS, reconnect = false)
+        }
+    }
     LaunchedEffect(Unit) {
         focusZone = CarouselFocusZone.CAROUSEL
         focus.requestFocus()
@@ -566,6 +721,8 @@ private enum class CarouselPosition(val labelTransform: CarouselLabelTransform) 
     }
 }
 
+enum class ServerAvailability { NOT_TESTED, CHECKING, AVAILABLE, UNAVAILABLE }
+
 private object CarouselHomeLayout {
     const val CAROUSEL_ASPECT_RATIO = 1.5f
     const val SAFE_WIDTH_FRACTION = .92f
@@ -614,51 +771,256 @@ fun ProjectionSettingsScreen(
     soundEnabled: Boolean,
     fadeEnabled: Boolean,
     selectedIndex: Int,
+    serverMode: ServerMode,
+    manualAddress: String,
+    detectedAddress: String?,
+    discoveryStatus: DiscoveryStatus,
+    availability: ServerAvailability,
+    manualEditing: Boolean,
+    onManualEditingChanged: (Boolean) -> Unit,
+    onManualDone: () -> Unit,
+    onManualAddressChanged: (String) -> Unit,
     onSoundChanged: (Boolean) -> Unit,
     onFadeChanged: (Boolean) -> Unit,
 ) {
+    val manualFieldFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(serverMode, selectedIndex, manualEditing) {
+        if (serverMode == ServerMode.MANUAL && selectedIndex == 3 && manualEditing) {
+            manualFieldFocus.requestFocus()
+            keyboard?.show()
+        } else if (!manualEditing) {
+            keyboard?.hide()
+        }
+    }
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = .58f)),
         contentAlignment = Alignment.Center,
     ) {
-        val cardWidth = (maxWidth * .52f).coerceAtMost(760.dp)
+        val cardWidth = (maxWidth * .58f).coerceAtMost(840.dp)
         Column(
             modifier = Modifier
                 .width(cardWidth)
                 .background(Color(0xFF101216).copy(alpha = .96f), RoundedCornerShape(14.dp))
                 .border(1.dp, VirtualDiapoColors.WarmSlate, RoundedCornerShape(14.dp))
-                .padding(horizontal = 32.dp, vertical = 28.dp),
+                .padding(horizontal = 30.dp, vertical = 24.dp),
         ) {
             Text(
-                "Réglages de projection",
+                "Réglages",
                 color = VirtualDiapoColors.Cream,
                 fontSize = 28.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
+            SectionLabel("PROJECTION")
+            Spacer(Modifier.height(10.dp))
             ProjectionSettingRow(
                 label = "Son de transition",
                 checked = soundEnabled,
                 selected = selectedIndex == 0,
                 onChanged = onSoundChanged,
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             ProjectionSettingRow(
                 label = "Fondu entre les diapositives",
                 checked = fadeEnabled,
                 selected = selectedIndex == 1,
                 onChanged = onFadeChanged,
             )
+            Spacer(Modifier.height(18.dp))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(VirtualDiapoColors.WarmSlate.copy(alpha = .70f)))
+            Spacer(Modifier.height(18.dp))
+            SectionLabel("SERVEUR")
+            Spacer(Modifier.height(10.dp))
+            ServerModeControl(serverMode = serverMode, focused = selectedIndex == 2)
+            Spacer(Modifier.height(12.dp))
+            if (serverMode == ServerMode.MDNS) {
+                ReadOnlyServerAddress(
+                    value = detectedAddress ?: when (discoveryStatus) {
+                        DiscoveryStatus.SEARCHING -> "Recherche automatique…"
+                        DiscoveryStatus.STOPPED -> "Découverte arrêtée"
+                        else -> "Aucune adresse détectée"
+                    },
+                )
+            } else {
+                Box(Modifier.fillMaxWidth().height(56.dp)) {
+                    OutlinedTextField(
+                        value = manualAddress,
+                        onValueChange = onManualAddressChanged,
+                        label = { Text("Adresse du serveur") },
+                        placeholder = { Text("192.168.1.20:8080") },
+                        singleLine = true,
+                        enabled = true,
+                        readOnly = !manualEditing,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Done,
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                keyboard?.hide()
+                                focusManager.clearFocus(force = true)
+                                onManualEditingChanged(false)
+                                onManualDone()
+                            },
+                        ),
+                        shape = RoundedCornerShape(9.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.Black.copy(alpha = .20f),
+                            unfocusedContainerColor = Color.Black.copy(alpha = .20f),
+                            focusedBorderColor = VirtualDiapoColors.Amber,
+                            unfocusedBorderColor = VirtualDiapoColors.WarmSlate,
+                            cursorColor = VirtualDiapoColors.Amber,
+                        ),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .focusRequester(manualFieldFocus),
+                    )
+                    if (selectedIndex == 3 && !manualEditing) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .border(3.dp, VirtualDiapoColors.Amber, RoundedCornerShape(9.dp)),
+                        )
+                    }
+                }
+                val syntaxInvalid = manualAddress.isNotBlank() && ServerAddressValidator.normalize(manualAddress) == null
+                if (syntaxInvalid) {
+                    Text(
+                        "! Adresse invalide — exemple : 192.168.1.20:8080",
+                        color = VirtualDiapoColors.Error,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                ManualTestButton(
+                    enabled = ServerAddressValidator.normalize(manualAddress) != null,
+                    focused = selectedIndex == 4,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            val syntaxInvalid = serverMode == ServerMode.MANUAL &&
+                manualAddress.isNotBlank() &&
+                ServerAddressValidator.normalize(manualAddress) == null
+            if (!syntaxInvalid) {
+                AvailabilityText(
+                    serverMode = serverMode,
+                    discoveryStatus = discoveryStatus,
+                    hasDetectedAddress = detectedAddress != null,
+                    availability = availability,
+                )
+            }
             Spacer(Modifier.height(22.dp))
             Text(
-                "↑ ↓ choisir   •   OK modifier   •   Retour fermer",
+                if (serverMode == ServerMode.MANUAL) {
+                    "↑ ↓ choisir   •   ← → mode   •   OK modifier / tester   •   Retour fermer"
+                } else {
+                    "↑ ↓ choisir   •   ← → mode   •   OK modifier   •   Retour fermer"
+                },
                 color = VirtualDiapoColors.Cream.copy(alpha = .66f),
                 fontSize = 16.sp,
             )
         }
     }
+}
+
+@Composable
+private fun SectionLabel(label: String) {
+    Text(label, color = VirtualDiapoColors.Champagne.copy(alpha = .72f), fontSize = 14.sp)
+}
+
+@Composable
+private fun ServerModeControl(serverMode: ServerMode, focused: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .border(if (focused) 3.dp else 1.dp, if (focused) VirtualDiapoColors.Amber else VirtualDiapoColors.WarmSlate, RoundedCornerShape(9.dp)),
+    ) {
+        listOf(ServerMode.MDNS to "Automatique (mDNS)", ServerMode.MANUAL to "Manuel").forEach { (mode, label) ->
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .background(if (serverMode == mode) Color(0xFFD5B078) else Color.Transparent, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color = if (serverMode == mode) Color(0xFF111315) else VirtualDiapoColors.Cream.copy(alpha = .72f),
+                    fontSize = 16.sp,
+                    fontWeight = if (serverMode == mode) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadOnlyServerAddress(value: String) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(Color.Black.copy(alpha = .22f), RoundedCornerShape(8.dp))
+            .border(1.dp, VirtualDiapoColors.WarmSlate.copy(alpha = .55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+    ) {
+        Text("Adresse détectée", color = VirtualDiapoColors.Cream.copy(alpha = .52f), fontSize = 12.sp)
+        Text(value, color = VirtualDiapoColors.Cream.copy(alpha = .58f), fontSize = 17.sp)
+    }
+}
+
+@Composable
+private fun ManualTestButton(enabled: Boolean, focused: Boolean) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .38f }
+            .background(
+                if (focused) Color(0xFF15171A).copy(alpha = .92f) else Color.Black.copy(alpha = .22f),
+                RoundedCornerShape(9.dp),
+            )
+            .border(
+                if (focused) 3.dp else 1.dp,
+                if (focused) VirtualDiapoColors.Amber else VirtualDiapoColors.Champagne.copy(alpha = .55f),
+                RoundedCornerShape(9.dp),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Enregistrer et tester", color = VirtualDiapoColors.Cream, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun AvailabilityText(
+    serverMode: ServerMode,
+    discoveryStatus: DiscoveryStatus,
+    hasDetectedAddress: Boolean,
+    availability: ServerAvailability,
+) {
+    val (text, color) = when {
+        availability == ServerAvailability.CHECKING -> "◌ Vérification…" to VirtualDiapoColors.Champagne
+        availability == ServerAvailability.AVAILABLE -> "✓ Disponible" to Color(0xFF69C776)
+        availability == ServerAvailability.UNAVAILABLE && hasDetectedAddress -> "! Détecté mais indisponible" to VirtualDiapoColors.Amber
+        availability == ServerAvailability.UNAVAILABLE -> "! Serveur indisponible" to VirtualDiapoColors.Error
+        serverMode == ServerMode.MANUAL -> "○ Serveur non testé" to VirtualDiapoColors.Cream.copy(alpha = .66f)
+        discoveryStatus == DiscoveryStatus.SEARCHING -> "◌ Recherche automatique…" to VirtualDiapoColors.Champagne
+        discoveryStatus == DiscoveryStatus.UNAVAILABLE -> "! Découverte indisponible" to VirtualDiapoColors.Error
+        else -> "○ Aucun serveur détecté" to VirtualDiapoColors.Cream.copy(alpha = .66f)
+    }
+    Text(
+        text = text,
+        color = color,
+        fontSize = 15.sp,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 @Composable
@@ -671,6 +1033,7 @@ private fun ProjectionSettingRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 54.dp)
             .border(
                 width = if (selected) 3.dp else 1.dp,
                 color = if (selected) VirtualDiapoColors.Amber else VirtualDiapoColors.WarmSlate,
@@ -678,7 +1041,7 @@ private fun ProjectionSettingRow(
             )
             .background(Color.Black.copy(alpha = .28f), RoundedCornerShape(10.dp))
             .clickable { onChanged(!checked) }
-            .padding(horizontal = 24.dp, vertical = 18.dp),
+            .padding(horizontal = 20.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
