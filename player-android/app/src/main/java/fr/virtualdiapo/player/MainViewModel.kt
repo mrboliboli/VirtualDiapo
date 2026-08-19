@@ -16,7 +16,7 @@ sealed interface PlayerUiState {
     data object Connecting : PlayerUiState
     data class LoadingCarousel(val title: String) : PlayerUiState
     data class CollectionSelection(val address: String, val collections: List<CollectionSummary>) : PlayerUiState
-    data class Ready(val collection: SlideCollection) : PlayerUiState
+    data class Ready(val address: String, val collection: SlideCollection) : PlayerUiState
     data class Failure(val message: String, val address: String) : PlayerUiState
 }
 
@@ -57,7 +57,7 @@ class MainViewModel(
         viewModelScope.launch {
             _state.value = runCatching { apiClient.loadCollection(address, collection.id) }
                 .fold(
-                    onSuccess = PlayerUiState::Ready,
+                    onSuccess = { PlayerUiState.Ready(address, it) },
                     onFailure = { PlayerUiState.Failure(connectionErrorMessage(it), address) },
                 )
         }
@@ -69,6 +69,13 @@ class MainViewModel(
 
     fun returnToCollections() {
         _state.value = lastSelection ?: PlayerUiState.Setup
+    }
+
+    fun reportProjectionFailure(address: String, error: Throwable) {
+        _state.value = PlayerUiState.Failure(
+            "Connexion perdue pendant la projection. ${connectionErrorMessage(error)}",
+            address,
+        )
     }
 
     private fun updateSelection(selection: PlayerUiState.CollectionSelection) {

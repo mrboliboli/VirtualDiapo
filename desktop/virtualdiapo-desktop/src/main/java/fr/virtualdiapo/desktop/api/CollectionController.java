@@ -65,7 +65,7 @@ public final class CollectionController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable("id") UUID id) throws IOException {
+    public ResponseEntity<Void> delete(@PathVariable("id") UUID id) {
         return management.delete(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 

@@ -6,3 +6,4 @@ desktop/.m2/
 player-android/.gradle/
 player-android/local.properties
 player-android/**/build/
+.aider*

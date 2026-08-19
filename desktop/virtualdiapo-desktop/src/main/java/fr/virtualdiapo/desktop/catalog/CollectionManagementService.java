@@ -4,6 +4,8 @@ import fr.virtualdiapo.core.CollectionCatalog;
 import fr.virtualdiapo.core.SlideCollection;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,6 +14,7 @@ import java.util.UUID;
 
 @Service
 public final class CollectionManagementService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CollectionManagementService.class);
     private final CollectionCatalog catalog;
     private final Path imageDirectory;
 
@@ -34,7 +37,7 @@ public final class CollectionManagementService {
         return updated;
     }
 
-    public boolean delete(UUID id) throws IOException {
+    public boolean delete(UUID id) {
         var collection = catalog.findById(id);
         if (collection.isEmpty()) {
             return false;
@@ -42,16 +45,13 @@ public final class CollectionManagementService {
         if (!catalog.deleteById(id)) {
             return false;
         }
-        IOException failure = null;
         for (var slide : collection.get().slides()) {
             try {
                 Files.deleteIfExists(imageDirectory.resolve(slide.id() + ".jpg"));
             } catch (IOException exception) {
-                failure = exception;
+                LOGGER.warn("Collection {} supprimée, mais le fichier de la diapositive {} n'a pas pu être nettoyé",
+                        id, slide.id(), exception);
             }
-        }
-        if (failure != null) {
-            throw failure;
         }
         return true;
     }

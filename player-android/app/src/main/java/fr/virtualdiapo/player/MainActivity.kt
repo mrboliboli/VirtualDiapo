@@ -55,6 +55,10 @@ import fr.virtualdiapo.player.ui.DiscoveryScreen
 import fr.virtualdiapo.player.ui.SplashScreen
 import fr.virtualdiapo.player.ui.theme.VirtualDiapoTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 private const val SPLASH_DURATION_MS = 1_800L
@@ -163,13 +167,19 @@ private fun VirtualDiapoApp(
         )
         is PlayerUiState.Ready -> {
             BackHandler(onBack = viewModel::returnToCollections)
-            ProjectionScreen(current.collection)
+            ProjectionScreen(
+                collection = current.collection,
+                onConnectionLost = { viewModel.reportProjectionFailure(current.address, it) },
+            )
         }
     }
 }
 
 @Composable
-private fun ProjectionScreen(collection: SlideCollection) {
+private fun ProjectionScreen(
+    collection: SlideCollection,
+    onConnectionLost: (Throwable) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sound = remember { MechanicalSoundPlayer(context) }
@@ -212,8 +222,11 @@ private fun ProjectionScreen(collection: SlideCollection) {
                 sound.play()
                 delay(MechanicalSoundPlayer.SLIDE_APPEAR_TIME_MS)
                 if (projection == transition) projection = transition.reveal()
-            } catch (_: Exception) {
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
                 if (projection == preparing) projection = preparing.cancelPreparation()
+                onConnectionLost(exception)
             }
         }
     }
@@ -279,16 +292,26 @@ private fun PreloadAdjacentImages(
 ) {
     val context = LocalContext.current
     LaunchedEffect(collection.id, currentIndex) {
-        listOf(currentIndex - 1, currentIndex, currentIndex + 1)
+        val indices = listOf(currentIndex - 1, currentIndex, currentIndex + 1)
             .filter { it in collection.slides.indices }
-            .forEach { index ->
-                imageLoader.enqueue(
-                    ImageRequest.Builder(context)
-                        .data(collection.slides[index].imageUrl)
-                        .size(width, height)
-                        .precision(Precision.INEXACT)
-                        .build(),
-                )
-            }
+        coroutineScope {
+            indices.map { index ->
+                async {
+                    try {
+                        imageLoader.execute(
+                            ImageRequest.Builder(context)
+                                .data(collection.slides[index].imageUrl)
+                                .size(width, height)
+                                .precision(Precision.INEXACT)
+                                .build(),
+                        )
+                    } catch (exception: CancellationException) {
+                        throw exception
+                    } catch (_: Exception) {
+                        // Preloading is best effort. The foreground request reports actionable failures.
+                    }
+                }
+            }.awaitAll()
+        }
     }
 }

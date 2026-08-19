@@ -1,4 +1,4 @@
- ---
+---
 name: virtualdiapo-designer
 description: Visual design and asset creation skill for VirtualDiapo. Use for UI visual consistency, graphical assets, image generation, and validation against the approved VirtualDiapo design reference.
 ---
