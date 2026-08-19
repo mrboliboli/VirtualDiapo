@@ -12,7 +12,7 @@ class ProjectionStateTest {
         val loading = preparing.beginMechanicalTransition()!!
 
         assertEquals(ProjectionState.Preparing(3, null, ProjectionState.Destination.Slide(0)), preparing)
-        assertEquals(ProjectionState.Transition(3, ProjectionState.Destination.Slide(0)), loading)
+        assertEquals(ProjectionState.Transition(3, null, ProjectionState.Destination.Slide(0), 1), loading)
         assertEquals(ProjectionState.Slide(3, 0), loading.reveal())
     }
 
@@ -22,7 +22,10 @@ class ProjectionStateTest {
         val transition = preparing.beginMechanicalTransition()!!
 
         assertEquals(ProjectionState.Slide(3, 2), preparing.cancelPreparation())
-        assertEquals(ProjectionState.Transition(3, ProjectionState.Destination.End), transition)
+        assertEquals(
+            ProjectionState.Transition(3, ProjectionState.Destination.Slide(2), ProjectionState.Destination.End, 1),
+            transition,
+        )
         assertEquals(ProjectionState.EndOfCarousel(3), transition.reveal())
     }
 
@@ -38,6 +41,7 @@ class ProjectionStateTest {
         val transition = ProjectionState.EndOfCarousel(3).beginMove(-1)!!.beginMechanicalTransition()!!
 
         assertEquals(ProjectionState.Slide(3, 2), transition.reveal())
+        assertEquals(-1, (transition as ProjectionState.Transition).direction)
     }
 
     @Test

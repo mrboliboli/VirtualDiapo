@@ -23,8 +23,18 @@ sealed interface ProjectionState {
         }
     }
 
-    data class Transition(override val slideCount: Int, val destination: Destination) : ProjectionState {
-        init { require(slideCount > 0); destination.validate(slideCount) }
+    data class Transition(
+        override val slideCount: Int,
+        val origin: Destination?,
+        val destination: Destination,
+        val direction: Int,
+    ) : ProjectionState {
+        init {
+            require(slideCount > 0)
+            require(direction in setOf(-1, 1))
+            origin?.validate(slideCount)
+            destination.validate(slideCount)
+        }
     }
 
     data class EndOfCarousel(override val slideCount: Int) : ProjectionState {
@@ -62,7 +72,12 @@ sealed interface ProjectionState {
     }
 
     fun beginMechanicalTransition(): ProjectionState? = when (this) {
-        is Preparing -> Transition(slideCount, destination)
+        is Preparing -> Transition(
+            slideCount = slideCount,
+            origin = origin,
+            destination = destination,
+            direction = direction(),
+        )
         else -> null
     }
 
@@ -107,6 +122,17 @@ sealed interface ProjectionState {
             Destination.End -> slideCount
         }
         is EndOfCarousel -> slideCount
+    }
+
+    private fun Preparing.direction(): Int = when {
+        origin == Destination.End -> -1
+        destination == Destination.End -> 1
+        origin == null -> 1
+        else -> {
+            val originIndex = (origin as Destination.Slide).index
+            val destinationIndex = (destination as Destination.Slide).index
+            if (destinationIndex > originIndex) 1 else -1
+        }
     }
 
     companion object {

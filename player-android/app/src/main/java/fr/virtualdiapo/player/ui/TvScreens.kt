@@ -27,6 +27,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -431,6 +433,82 @@ fun CarouselLoadingScreen(title: String) {
                 modifier = Modifier.padding(top = 28.dp).size(44.dp),
             )
         }
+    }
+}
+
+@Composable
+fun ProjectionSettingsScreen(
+    soundEnabled: Boolean,
+    fadeEnabled: Boolean,
+    selectedIndex: Int,
+    onSoundChanged: (Boolean) -> Unit,
+    onFadeChanged: (Boolean) -> Unit,
+) {
+    CinematicBackground {
+        Column(
+            modifier = Modifier.fillMaxWidth(.55f),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+        ) {
+            Text(
+                "Réglages de projection",
+                color = VirtualDiapoColors.Cream,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            ProjectionSettingRow(
+                label = "Son de transition",
+                checked = soundEnabled,
+                selected = selectedIndex == 0,
+                onChanged = onSoundChanged,
+            )
+            ProjectionSettingRow(
+                label = "Fondu entre les diapositives",
+                checked = fadeEnabled,
+                selected = selectedIndex == 1,
+                onChanged = onFadeChanged,
+            )
+            Text(
+                "↑ ↓ choisir   •   OK modifier   •   Retour fermer",
+                color = VirtualDiapoColors.Cream.copy(alpha = .66f),
+                fontSize = 16.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProjectionSettingRow(
+    label: String,
+    checked: Boolean,
+    selected: Boolean,
+    onChanged: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) VirtualDiapoColors.Amber else VirtualDiapoColors.WarmSlate,
+                shape = RoundedCornerShape(10.dp),
+            )
+            .background(Color.Black.copy(alpha = .28f), RoundedCornerShape(10.dp))
+            .clickable { onChanged(!checked) }
+            .padding(horizontal = 24.dp, vertical = 18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = VirtualDiapoColors.Cream, fontSize = 19.sp)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color(0xFF080A0C),
+                checkedTrackColor = Color(0xFFD5B078),
+                uncheckedThumbColor = Color(0xFFF5E7CF).copy(alpha = .82f),
+                uncheckedTrackColor = Color(0xFF1A1C20),
+                uncheckedBorderColor = Color(0xFF2E3238),
+            ),
+        )
     }
 }
 

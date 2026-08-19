@@ -9,23 +9,29 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -33,32 +39,35 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.ImageLoader
 import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
-import coil3.request.crossfade
-import coil3.size.Precision
 import fr.virtualdiapo.player.model.SlideCollection
 import fr.virtualdiapo.player.network.DiscoveredServer
 import fr.virtualdiapo.player.network.DiscoveryStatus
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
+import fr.virtualdiapo.player.projection.PreloadWindow
+import fr.virtualdiapo.player.projection.ProjectionOptions
+import fr.virtualdiapo.player.projection.ProjectionPreferences
 import fr.virtualdiapo.player.projection.ProjectionState
+import fr.virtualdiapo.player.projection.ProjectionTransition
+import fr.virtualdiapo.player.projection.SlidePreloader
+import fr.virtualdiapo.player.projection.SlideTransform
 import fr.virtualdiapo.player.ui.CarouselHomeScreen
 import fr.virtualdiapo.player.ui.CarouselLoadingScreen
 import fr.virtualdiapo.player.ui.DiscoveryFailureScreen
 import fr.virtualdiapo.player.ui.DiscoveryScreen
+import fr.virtualdiapo.player.ui.ProjectionSettingsScreen
 import fr.virtualdiapo.player.ui.SplashScreen
 import fr.virtualdiapo.player.ui.theme.VirtualDiapoTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private const val SPLASH_DURATION_MS = 1_800L
@@ -182,7 +191,8 @@ private fun ProjectionScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sound = remember { MechanicalSoundPlayer(context) }
+    val sound = remember(collection.id) { MechanicalSoundPlayer(context) }
+    val preferences = remember { ProjectionPreferences(context) }
     val projectionFocus = remember { FocusRequester() }
     val slideCount = collection.slides.size
     val projectionSaver = remember(slideCount) {
@@ -194,33 +204,44 @@ private fun ProjectionScreen(
     var projection by rememberSaveable(collection.id, stateSaver = projectionSaver) {
         mutableStateOf(ProjectionState.initial(slideCount))
     }
+    var options by remember { mutableStateOf(preferences.load()) }
+    var initialPreparation by remember(collection.id) { mutableStateOf(projection is ProjectionState.LoadingFirstSlide) }
+    var navigationHintVisible by rememberSaveable(collection.id) { mutableStateOf(true) }
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
+    var selectedSetting by rememberSaveable { mutableIntStateOf(0) }
+    var transitionJob by remember(collection.id) { mutableStateOf<Job?>(null) }
     val imageLoader = coil3.SingletonImageLoader.get(context)
     val displayMetrics = context.resources.displayMetrics
     val projectionWidth = displayMetrics.widthPixels
     val projectionHeight = displayMetrics.heightPixels
+    val preloader = remember(collection.id, projectionWidth, projectionHeight) {
+        SlidePreloader(
+            context = context.applicationContext,
+            imageLoader = imageLoader,
+            imageUrls = collection.slides.map { it.imageUrl },
+            width = projectionWidth,
+            height = projectionHeight,
+        )
+    }
 
-    fun imageRequest(index: Int) = ImageRequest.Builder(context)
-        .data(collection.slides[index].imageUrl)
-        .size(projectionWidth, projectionHeight)
-        .precision(Precision.INEXACT)
-        .crossfade(false)
-        .build()
-
-    fun prepareAndRun(preparing: ProjectionState) {
+    fun prepareAndRun(preparingState: ProjectionState) {
+        val preparing = preparingState as? ProjectionState.Preparing ?: return
+        transitionJob?.cancel()
         projection = preparing
-        scope.launch {
+        transitionJob = scope.launch {
             try {
-                preparing.targetSlideIndex()?.let { targetIndex ->
-                    check(imageLoader.execute(imageRequest(targetIndex)) is coil3.request.SuccessResult) {
-                        "Impossible de préparer la diapositive"
-                    }
+                if (preparing.origin == null) {
+                    preloader.prepareInitial(PreloadWindow.initialIndices(slideCount))
+                    initialPreparation = false
+                } else {
+                    preparing.targetSlideIndex()?.let { preloader.ensure(it) }
                 }
-                sound.awaitReady()
+                if (options.soundEnabled) sound.awaitReady()
                 val transition = preparing.beginMechanicalTransition() ?: return@launch
                 if (projection != preparing) return@launch
                 projection = transition
-                sound.play()
-                delay(MechanicalSoundPlayer.SLIDE_APPEAR_TIME_MS)
+                if (options.soundEnabled) sound.play()
+                delay(ProjectionTransition.TOTAL_DURATION_MS)
                 if (projection == transition) projection = transition.reveal()
             } catch (exception: CancellationException) {
                 throw exception
@@ -235,83 +256,196 @@ private fun ProjectionScreen(
         prepareAndRun(projection.beginMove(delta) ?: return)
     }
 
-    val preloadIndex = when (val state = projection) {
-        is ProjectionState.LoadingFirstSlide -> 0
-        is ProjectionState.Slide -> state.index
-        is ProjectionState.Preparing -> state.targetSlideIndex() ?: slideCount - 1
-        is ProjectionState.Transition -> when (val destination = state.destination) {
-            is ProjectionState.Destination.Slide -> destination.index
-            ProjectionState.Destination.End -> slideCount - 1
-        }
-        is ProjectionState.EndOfCarousel -> slideCount - 1
+    fun updateOptions(updated: ProjectionOptions) {
+        options = updated
+        preferences.save(updated)
     }
 
-    PreloadAdjacentImages(collection, preloadIndex, imageLoader, projectionWidth, projectionHeight)
-    DisposableEffect(Unit) { onDispose(sound::release) }
+    DisposableEffect(collection.id) {
+        onDispose {
+            transitionJob?.cancel()
+            sound.release()
+        }
+    }
+    LaunchedEffect(projection.settledPosition()) {
+        val currentIndex = (projection as? ProjectionState.Slide)?.index ?: return@LaunchedEffect
+        preloader.updateWindow(currentIndex)
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
             .focusRequester(projectionFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
+                navigationHintVisible = false
+                if (settingsVisible) {
+                    when (event.key) {
+                        Key.DirectionUp -> selectedSetting = (selectedSetting - 1).coerceAtLeast(0)
+                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(1)
+                        Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
+                            if (selectedSetting == 0) {
+                                updateOptions(options.copy(soundEnabled = !options.soundEnabled))
+                            } else {
+                                updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
+                            }
+                        }
+                        Key.Back, Key.Menu -> settingsVisible = false
+                        else -> return@onPreviewKeyEvent false
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 when (event.key) {
                     Key.DirectionRight, Key.Enter, Key.NumPadEnter, Key.MediaNext -> move(1)
                     Key.DirectionLeft, Key.MediaPrevious -> move(-1)
+                    Key.Menu, Key.DirectionDown -> settingsVisible = true
                     else -> return@onPreviewKeyEvent false
                 }
                 true
             },
         contentAlignment = Alignment.Center,
     ) {
-        projection.visibleSlideIndex()?.let { visibleSlideIndex ->
-            AsyncImage(
-                model = imageRequest(visibleSlideIndex),
-                contentDescription = null,
-                imageLoader = imageLoader,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
+        ProjectionSurface()
+        ProjectionContent(
+            projection = projection,
+            preloader = preloader,
+            imageLoader = imageLoader,
+            fadeEnabled = options.fadeEnabled,
+        )
+        if (initialPreparation) {
+            CarouselLoadingScreen(collection.title)
+        }
+        if (!initialPreparation && navigationHintVisible && !settingsVisible) {
+            Text(
+                text = "↓  Réglages de projection",
+                color = Color(0xFFF5E7CF).copy(alpha = .66f),
+                fontSize = 15.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 36.dp),
+            )
+        }
+        if (settingsVisible) {
+            ProjectionSettingsScreen(
+                soundEnabled = options.soundEnabled,
+                fadeEnabled = options.fadeEnabled,
+                selectedIndex = selectedSetting,
+                onSoundChanged = { updateOptions(options.copy(soundEnabled = it)) },
+                onFadeChanged = { updateOptions(options.copy(fadeEnabled = it)) },
             )
         }
     }
+    BackHandler(enabled = settingsVisible) { settingsVisible = false }
     LaunchedEffect(collection.id) {
         projectionFocus.requestFocus()
         prepareAndRun(projection.beginInitialLoad() ?: return@LaunchedEffect)
     }
+    LaunchedEffect(initialPreparation) {
+        if (!initialPreparation) {
+            delay(4_500L)
+            navigationHintVisible = false
+        }
+    }
 }
 
 @Composable
-private fun PreloadAdjacentImages(
-    collection: SlideCollection,
-    currentIndex: Int,
-    imageLoader: ImageLoader,
-    width: Int,
-    height: Int,
+private fun ProjectionContent(
+    projection: ProjectionState,
+    preloader: SlidePreloader,
+    imageLoader: coil3.ImageLoader,
+    fadeEnabled: Boolean,
 ) {
-    val context = LocalContext.current
-    LaunchedEffect(collection.id, currentIndex) {
-        val indices = listOf(currentIndex - 1, currentIndex, currentIndex + 1)
-            .filter { it in collection.slides.indices }
-        coroutineScope {
-            indices.map { index ->
-                async {
-                    try {
-                        imageLoader.execute(
-                            ImageRequest.Builder(context)
-                                .data(collection.slides[index].imageUrl)
-                                .size(width, height)
-                                .precision(Precision.INEXACT)
-                                .build(),
-                        )
-                    } catch (exception: CancellationException) {
-                        throw exception
-                    } catch (_: Exception) {
-                        // Preloading is best effort. The foreground request reports actionable failures.
-                    }
+    if (projection is ProjectionState.Transition) {
+        var elapsedMs by remember(projection) { mutableLongStateOf(0L) }
+        LaunchedEffect(projection) {
+            var startTime: Long? = null
+            while (elapsedMs < ProjectionTransition.TOTAL_DURATION_MS) {
+                withFrameMillis { frameTime ->
+                    val start = startTime ?: frameTime.also { startTime = it }
+                    elapsedMs = (frameTime - start).coerceAtMost(ProjectionTransition.TOTAL_DURATION_MS)
                 }
-            }.awaitAll()
+            }
         }
+        val origin = projection.origin as? ProjectionState.Destination.Slide
+        if (origin != null && elapsedMs <= 140L) {
+            ProjectionSlide(
+                index = origin.index,
+                transform = ProjectionTransition.outgoing(elapsedMs, projection.direction, fadeEnabled),
+                preloader = preloader,
+                imageLoader = imageLoader,
+            )
+        }
+        val destination = projection.destination as? ProjectionState.Destination.Slide
+        if (destination != null && elapsedMs >= ProjectionTransition.ENTRY_START_MS) {
+            ProjectionSlide(
+                index = destination.index,
+                transform = ProjectionTransition.incoming(elapsedMs, projection.direction, fadeEnabled),
+                preloader = preloader,
+                imageLoader = imageLoader,
+            )
+        }
+        return
     }
+    projection.visibleSlideIndex()?.let { index ->
+        ProjectionSlide(
+            index = index,
+            transform = SlideTransform(0f, 0f, 0f, 1f, 1f),
+            preloader = preloader,
+            imageLoader = imageLoader,
+        )
+    }
+}
+
+@Composable
+private fun ProjectionSlide(
+    index: Int,
+    transform: SlideTransform,
+    preloader: SlidePreloader,
+    imageLoader: coil3.ImageLoader,
+) {
+    AsyncImage(
+        model = preloader.request(index),
+        contentDescription = null,
+        imageLoader = imageLoader,
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationX = transform.translationXFactor * density
+                translationY = transform.translationYFactor * density
+                rotationZ = transform.rotationZ
+                scaleX = transform.scale
+                scaleY = transform.scale
+                alpha = transform.alpha
+            },
+        contentScale = ContentScale.Fit,
+    )
+}
+
+@Composable
+private fun ProjectionSurface() {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFFD8C5A3))
+            .background(
+                Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0f to Color(0xFFF5E8CF),
+                        .55f to Color(0xFFE7D6B8),
+                        1f to Color(0xFFB8A17D),
+                    ),
+                ),
+            )
+            .background(
+                Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0f to Color.Transparent,
+                        .72f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = .22f),
+                    ),
+                ),
+            )
+            .background(Color(0xFFE8A84C).copy(alpha = .035f)),
+    )
 }
