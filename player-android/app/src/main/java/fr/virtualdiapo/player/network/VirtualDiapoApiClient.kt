@@ -100,7 +100,7 @@ class VirtualDiapoApiClient {
 
 internal fun connectionErrorMessage(error: Throwable): String = when (error) {
     is SocketTimeoutException -> "Le serveur ne répond pas. Vérifiez le réseau et réessayez."
-    is ConnectException -> "Connexion refusée. Vérifiez que VirtualDiapo est lancé sur le Mac."
+    is ConnectException -> "Connexion refusée. Vérifiez que VirtualDiapo est lancé sur l’ordinateur."
     is UnknownHostException -> "Serveur introuvable. Vérifiez l’adresse ou la connexion réseau."
     is IllegalArgumentException -> error.message ?: "Adresse du serveur invalide."
     else -> error.message?.takeIf(String::isNotBlank) ?: "Connexion impossible."

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive-icon foreground derived from the approved projector symbol.
+    The artwork intentionally has no background and no pre-rounded mask.
+    All essential geometry stays inside Android's 66 x 66 dp safe circle.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Uniform optical scaling around the adaptive-icon centre. The outermost
+        stroked screen corner is then 31.9 dp from (54,54), inside the 33 dp
+        safe-circle radius while preserving the approved symbol proportions.
+    -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.76"
+        android:scaleY="0.76">
+
+    <!-- Projection screen and stand -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M65,31 L87,31 L87,47 L65,47 Z"
+        android:strokeColor="#F1DFC2"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2.4" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M76,47 L76,52"
+        android:strokeColor="#F1DFC2"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.8" />
+
+    <!-- Restrained warm projection beam -->
+    <path
+        android:fillColor="#42E8A84C"
+        android:pathData="M48,53 L66,36 L66,46 L48,60 Z" />
+
+    <!-- Projector body -->
+    <path
+        android:fillColor="#17191B"
+        android:pathData="M22,49 Q22,45 26,45 L44,45 Q48,45 48,49 L48,61 Q48,65 44,65 L26,65 Q22,65 22,61 Z"
+        android:strokeColor="#F1DFC2"
+        android:strokeWidth="2.2" />
+    <path
+        android:fillColor="#E6D0AE"
+        android:pathData="M25,48 Q25,47 27,47 L31,47 Q32,47 32,49 L32,61 Q32,63 30,63 L27,63 Q25,63 25,61 Z"
+        android:strokeColor="#F1DFC2"
+        android:strokeWidth="0.9" />
+    <path
+        android:fillColor="#17191B"
+        android:pathData="M28,50 m-1,0 a1,1 0,1 0,2 0 a1,1 0,1 0,-2 0" />
+
+    <!-- Lens housing and warm illuminated glass -->
+    <path
+        android:fillColor="#111315"
+        android:pathData="M48,55 m-9,0 a9,9 0,1 0,18 0 a9,9 0,1 0,-18 0"
+        android:strokeColor="#F1DFC2"
+        android:strokeWidth="2.1" />
+    <path
+        android:fillColor="#1A1714"
+        android:pathData="M48,55 m-6,0 a6,6 0,1 0,12 0 a6,6 0,1 0,-12 0"
+        android:strokeColor="#B9854C"
+        android:strokeWidth="1.1" />
+    <path
+        android:fillColor="#E39A3E"
+        android:pathData="M48,55 m-4,0 a4,4 0,1 0,8 0 a4,4 0,1 0,-8 0" />
+    <path
+        android:fillColor="#FFF1C9"
+        android:fillAlpha="0.94"
+        android:pathData="M47,54 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+
+    <!-- Feet -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M27,65 L25,69 M42,65 L44,69"
+        android:strokeColor="#F1DFC2"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.9" />
+    </group>
+</vector>
