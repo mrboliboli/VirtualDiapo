@@ -22,8 +22,17 @@ class CarouselFocusNavigationTest {
     }
 
     @Test
-    fun maximumSettingsIndex_shouldAdaptToServerMode() {
-        assertEquals(2, maximumSettingsIndex(ServerMode.MDNS))
-        assertEquals(4, maximumSettingsIndex(ServerMode.MANUAL))
+    fun settingsFocusLayout_shouldAdaptToAutoAdvanceAndServerMode() {
+        val mdnsOff = SettingsFocusLayout(autoAdvanceEnabled = false, serverMode = ServerMode.MDNS)
+        val manualOn = SettingsFocusLayout(autoAdvanceEnabled = true, serverMode = ServerMode.MANUAL)
+
+        assertEquals(null, mdnsOff.durationIndex)
+        assertEquals(3, mdnsOff.serverModeIndex)
+        assertEquals(3, mdnsOff.maximumIndex)
+        assertEquals(3, manualOn.durationIndex)
+        assertEquals(4, manualOn.serverModeIndex)
+        assertEquals(5, manualOn.manualAddressIndex)
+        assertEquals(6, manualOn.manualTestIndex)
+        assertEquals(6, manualOn.maximumIndex)
     }
 }

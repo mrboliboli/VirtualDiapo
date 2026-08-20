@@ -24,6 +24,11 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
@@ -83,6 +88,7 @@ import fr.virtualdiapo.player.R
 import fr.virtualdiapo.player.model.CollectionSummary
 import fr.virtualdiapo.player.projection.ProjectionOptions
 import fr.virtualdiapo.player.projection.ProjectionPreferences
+import fr.virtualdiapo.player.projection.AutoAdvancePolicy
 import fr.virtualdiapo.player.network.DiscoveredServer
 import fr.virtualdiapo.player.network.DiscoveryStatus
 import fr.virtualdiapo.player.network.ServerAddressValidator
@@ -97,10 +103,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -337,24 +347,44 @@ fun CarouselHomeScreen(
                         }
                         return@onPreviewKeyEvent false
                     }
-                    val maximumIndex = maximumSettingsIndex(serverConfiguration.mode)
+                    val focusLayout = SettingsFocusLayout(
+                        autoAdvanceEnabled = options.autoAdvanceEnabled,
+                        serverMode = serverConfiguration.mode,
+                    )
                     when (event.key) {
                         Key.DirectionUp -> selectedSetting = (selectedSetting - 1).coerceAtLeast(0)
-                        Key.DirectionDown -> selectedSetting = (selectedSetting + 1).coerceAtMost(maximumIndex)
-                        Key.DirectionLeft, Key.DirectionRight -> if (selectedSetting == 2) {
-                            val mode = if (serverConfiguration.mode == ServerMode.MDNS) ServerMode.MANUAL else ServerMode.MDNS
-                            switchServerMode(mode)
+                        Key.DirectionDown -> selectedSetting =
+                            (selectedSetting + 1).coerceAtMost(focusLayout.maximumIndex)
+                        Key.DirectionLeft, Key.DirectionRight -> when (selectedSetting) {
+                            focusLayout.durationIndex -> {
+                                val delta = if (event.key == Key.DirectionLeft) -1 else 1
+                                updateOptions(
+                                    options.copy(
+                                        autoAdvanceDelaySeconds = AutoAdvancePolicy.adjustDelay(
+                                            options.autoAdvanceDelaySeconds,
+                                            delta,
+                                        ),
+                                    ),
+                                )
+                            }
+                            focusLayout.serverModeIndex -> {
+                                val mode = if (serverConfiguration.mode == ServerMode.MDNS) ServerMode.MANUAL else ServerMode.MDNS
+                                switchServerMode(mode)
+                            }
                         }
                         Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> {
                             when (selectedSetting) {
                                 0 -> updateOptions(options.copy(soundEnabled = !options.soundEnabled))
                                 1 -> updateOptions(options.copy(fadeEnabled = !options.fadeEnabled))
-                                2 -> {
+                                focusLayout.autoAdvanceIndex -> updateOptions(
+                                    options.copy(autoAdvanceEnabled = !options.autoAdvanceEnabled),
+                                )
+                                focusLayout.serverModeIndex -> {
                                     val mode = if (serverConfiguration.mode == ServerMode.MDNS) ServerMode.MANUAL else ServerMode.MDNS
                                     switchServerMode(mode)
                                 }
-                                3 -> manualEditing = true
-                                4 -> saveAndTestManualAddress()
+                                focusLayout.manualAddressIndex -> manualEditing = true
+                                focusLayout.manualTestIndex -> saveAndTestManualAddress()
                             }
                         }
                         Key.Back -> {
@@ -467,6 +497,8 @@ fun CarouselHomeScreen(
             ProjectionSettingsScreen(
                 soundEnabled = options.soundEnabled,
                 fadeEnabled = options.fadeEnabled,
+                autoAdvanceEnabled = options.autoAdvanceEnabled,
+                autoAdvanceDelaySeconds = options.autoAdvanceDelaySeconds,
                 selectedIndex = selectedSetting,
                 serverMode = serverConfiguration.mode,
                 manualAddress = manualAddress,
@@ -483,6 +515,16 @@ fun CarouselHomeScreen(
                 },
                 onSoundChanged = { updateOptions(options.copy(soundEnabled = it)) },
                 onFadeChanged = { updateOptions(options.copy(fadeEnabled = it)) },
+                onAutoAdvanceChanged = {
+                    updateOptions(options.copy(autoAdvanceEnabled = it))
+                    if (!it) selectedSetting = SettingsFocusLayout(
+                        autoAdvanceEnabled = false,
+                        serverMode = serverConfiguration.mode,
+                    ).autoAdvanceIndex
+                },
+                onAutoAdvanceDelayChanged = {
+                    updateOptions(options.copy(autoAdvanceDelaySeconds = it))
+                },
             )
         }
     }
@@ -770,6 +812,8 @@ fun CarouselLoadingScreen(title: String) {
 fun ProjectionSettingsScreen(
     soundEnabled: Boolean,
     fadeEnabled: Boolean,
+    autoAdvanceEnabled: Boolean,
+    autoAdvanceDelaySeconds: Int,
     selectedIndex: Int,
     serverMode: ServerMode,
     manualAddress: String,
@@ -782,12 +826,17 @@ fun ProjectionSettingsScreen(
     onManualAddressChanged: (String) -> Unit,
     onSoundChanged: (Boolean) -> Unit,
     onFadeChanged: (Boolean) -> Unit,
+    onAutoAdvanceChanged: (Boolean) -> Unit,
+    onAutoAdvanceDelayChanged: (Int) -> Unit,
 ) {
+    val focusLayout = SettingsFocusLayout(autoAdvanceEnabled, serverMode)
     val manualFieldFocus = remember { FocusRequester() }
+    val itemBringRequesters = remember { List(7) { BringIntoViewRequester() } }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    LaunchedEffect(serverMode, selectedIndex, manualEditing) {
-        if (serverMode == ServerMode.MANUAL && selectedIndex == 3 && manualEditing) {
+    LaunchedEffect(serverMode, autoAdvanceEnabled, selectedIndex, manualEditing) {
+        itemBringRequesters.getOrNull(selectedIndex)?.bringIntoView()
+        if (selectedIndex == focusLayout.manualAddressIndex && manualEditing) {
             manualFieldFocus.requestFocus()
             keyboard?.show()
         } else if (!manualEditing) {
@@ -801,9 +850,11 @@ fun ProjectionSettingsScreen(
         contentAlignment = Alignment.Center,
     ) {
         val cardWidth = (maxWidth * .58f).coerceAtMost(840.dp)
+        val safeInset = if (maxHeight >= 720.dp) 32.dp else 24.dp
         Column(
             modifier = Modifier
                 .width(cardWidth)
+                .heightIn(max = maxHeight - safeInset * 2)
                 .background(Color(0xFF101216).copy(alpha = .96f), RoundedCornerShape(14.dp))
                 .border(1.dp, VirtualDiapoColors.WarmSlate, RoundedCornerShape(14.dp))
                 .padding(horizontal = 30.dp, vertical = 24.dp),
@@ -814,28 +865,65 @@ fun ProjectionSettingsScreen(
                 fontSize = 28.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(
+                        state = rememberScrollState(),
+                        enabled = false,
+                    ),
+            ) {
             Spacer(Modifier.height(20.dp))
             SectionLabel("PROJECTION")
             Spacer(Modifier.height(10.dp))
-            ProjectionSettingRow(
-                label = "Son de transition",
-                checked = soundEnabled,
-                selected = selectedIndex == 0,
-                onChanged = onSoundChanged,
-            )
+            Box(Modifier.bringIntoViewRequester(itemBringRequesters[0])) {
+                ProjectionSettingRow(
+                    label = "Son de transition",
+                    checked = soundEnabled,
+                    selected = selectedIndex == 0,
+                    onChanged = onSoundChanged,
+                )
+            }
             Spacer(Modifier.height(12.dp))
-            ProjectionSettingRow(
-                label = "Fondu entre les diapositives",
-                checked = fadeEnabled,
-                selected = selectedIndex == 1,
-                onChanged = onFadeChanged,
-            )
+            Box(Modifier.bringIntoViewRequester(itemBringRequesters[1])) {
+                ProjectionSettingRow(
+                    label = "Fondu entre les diapositives",
+                    checked = fadeEnabled,
+                    selected = selectedIndex == 1,
+                    onChanged = onFadeChanged,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Box(Modifier.bringIntoViewRequester(itemBringRequesters[focusLayout.autoAdvanceIndex])) {
+                ProjectionSettingRow(
+                    label = "Avance automatique",
+                    checked = autoAdvanceEnabled,
+                    selected = selectedIndex == focusLayout.autoAdvanceIndex,
+                    onChanged = onAutoAdvanceChanged,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Box(
+                Modifier.then(
+                    focusLayout.durationIndex?.let { Modifier.bringIntoViewRequester(itemBringRequesters[it]) }
+                        ?: Modifier,
+                ),
+            ) {
+                AutoAdvanceDurationRow(
+                    seconds = autoAdvanceDelaySeconds,
+                    enabled = autoAdvanceEnabled,
+                    selected = selectedIndex == focusLayout.durationIndex,
+                    onDelayChanged = onAutoAdvanceDelayChanged,
+                )
+            }
             Spacer(Modifier.height(18.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(VirtualDiapoColors.WarmSlate.copy(alpha = .70f)))
             Spacer(Modifier.height(18.dp))
             SectionLabel("SERVEUR")
             Spacer(Modifier.height(10.dp))
-            ServerModeControl(serverMode = serverMode, focused = selectedIndex == 2)
+            Box(Modifier.bringIntoViewRequester(itemBringRequesters[focusLayout.serverModeIndex])) {
+                ServerModeControl(serverMode = serverMode, focused = selectedIndex == focusLayout.serverModeIndex)
+            }
             Spacer(Modifier.height(12.dp))
             if (serverMode == ServerMode.MDNS) {
                 ReadOnlyServerAddress(
@@ -846,7 +934,12 @@ fun ProjectionSettingsScreen(
                     },
                 )
             } else {
-                Box(Modifier.fillMaxWidth().height(56.dp)) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .bringIntoViewRequester(itemBringRequesters[focusLayout.manualAddressIndex!!]),
+                ) {
                     OutlinedTextField(
                         value = manualAddress,
                         onValueChange = onManualAddressChanged,
@@ -879,7 +972,7 @@ fun ProjectionSettingsScreen(
                             .fillMaxSize()
                             .focusRequester(manualFieldFocus),
                     )
-                    if (selectedIndex == 3 && !manualEditing) {
+                    if (selectedIndex == focusLayout.manualAddressIndex && !manualEditing) {
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -898,10 +991,12 @@ fun ProjectionSettingsScreen(
                     )
                 }
                 Spacer(Modifier.height(12.dp))
-                ManualTestButton(
-                    enabled = ServerAddressValidator.normalize(manualAddress) != null,
-                    focused = selectedIndex == 4,
-                )
+                Box(Modifier.bringIntoViewRequester(itemBringRequesters[focusLayout.manualTestIndex!!])) {
+                    ManualTestButton(
+                        enabled = ServerAddressValidator.normalize(manualAddress) != null,
+                        focused = selectedIndex == focusLayout.manualTestIndex,
+                    )
+                }
             }
             Spacer(Modifier.height(12.dp))
             val syntaxInvalid = serverMode == ServerMode.MANUAL &&
@@ -915,12 +1010,14 @@ fun ProjectionSettingsScreen(
                     availability = availability,
                 )
             }
+            Spacer(Modifier.height(4.dp))
+            }
             Spacer(Modifier.height(22.dp))
             Text(
                 if (serverMode == ServerMode.MANUAL) {
-                    "↑ ↓ choisir   •   ← → mode   •   OK modifier / tester   •   Retour fermer"
+                    "↑ ↓ choisir   •   ← → régler   •   OK modifier / tester   •   Retour fermer"
                 } else {
-                    "↑ ↓ choisir   •   ← → mode   •   OK modifier   •   Retour fermer"
+                    "↑ ↓ choisir   •   ← → régler   •   OK modifier   •   Retour fermer"
                 },
                 color = VirtualDiapoColors.Cream.copy(alpha = .66f),
                 fontSize = 16.sp,
@@ -1040,7 +1137,15 @@ private fun ProjectionSettingRow(
                 shape = RoundedCornerShape(10.dp),
             )
             .background(Color.Black.copy(alpha = .28f), RoundedCornerShape(10.dp))
-            .clickable { onChanged(!checked) }
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onChanged,
+            )
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+                stateDescription = if (checked) "Activé" else "Désactivé"
+            }
             .padding(horizontal = 20.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -1057,6 +1162,80 @@ private fun ProjectionSettingRow(
                 uncheckedBorderColor = Color(0xFF2E3238),
             ),
         )
+    }
+}
+
+@Composable
+private fun AutoAdvanceDurationRow(
+    seconds: Int,
+    enabled: Boolean,
+    selected: Boolean,
+    onDelayChanged: (Int) -> Unit,
+) {
+    val normalizedSeconds = AutoAdvancePolicy.normalizeDelay(seconds)
+    val canDecrease = enabled && normalizedSeconds > AutoAdvancePolicy.MIN_DELAY_SECONDS
+    val canIncrease = enabled && normalizedSeconds < AutoAdvancePolicy.MAX_DELAY_SECONDS
+    val accessibilityActions = buildList {
+        if (canDecrease) add(
+            CustomAccessibilityAction("Diminuer la durée") {
+                onDelayChanged(AutoAdvancePolicy.adjustDelay(normalizedSeconds, -1))
+                true
+            },
+        )
+        if (canIncrease) add(
+            CustomAccessibilityAction("Augmenter la durée") {
+                onDelayChanged(AutoAdvancePolicy.adjustDelay(normalizedSeconds, 1))
+                true
+            },
+        )
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 24.dp)
+            .heightIn(min = 48.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else .4f }
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) VirtualDiapoColors.Amber else VirtualDiapoColors.WarmSlate,
+                shape = RoundedCornerShape(9.dp),
+            )
+            .background(Color.Black.copy(alpha = .22f), RoundedCornerShape(9.dp))
+            .semantics {
+                contentDescription = "Durée d’affichage"
+                stateDescription = if (enabled) "$normalizedSeconds secondes" else "Désactivée"
+                customActions = accessibilityActions
+                if (!enabled) disabled()
+            }
+            .padding(horizontal = 18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Durée d’affichage", color = VirtualDiapoColors.Cream, fontSize = 17.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "−",
+                color = VirtualDiapoColors.Cream.copy(
+                    alpha = if (enabled && !canDecrease) .35f else 1f,
+                ),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "  $normalizedSeconds s  ",
+                color = VirtualDiapoColors.Cream,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "+",
+                color = VirtualDiapoColors.Cream.copy(
+                    alpha = if (enabled && !canIncrease) .35f else 1f,
+                ),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

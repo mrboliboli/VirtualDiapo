@@ -74,4 +74,25 @@ class ProjectionStateTest {
         assertEquals(ProjectionState.Slide(3, 1), restored)
         assertNull(restored.beginInitialLoad())
     }
+
+    @Test
+    fun autoAdvance_shouldOnlyBeEligibleOnSettledSlideIncludingLastSlideBeforeEnd() {
+        assertEquals(1, AutoAdvancePolicy.eligibleSlideIndex(ProjectionState.Slide(3, 1), enabled = true))
+        assertEquals(2, AutoAdvancePolicy.eligibleSlideIndex(ProjectionState.Slide(3, 2), enabled = true))
+        assertNull(AutoAdvancePolicy.eligibleSlideIndex(ProjectionState.EndOfCarousel(3), enabled = true))
+        assertNull(AutoAdvancePolicy.eligibleSlideIndex(ProjectionState.Slide(3, 1), enabled = false))
+        val transition = ProjectionState.Slide(3, 0).beginMove(1)!!.beginMechanicalTransition()!!
+        assertNull(AutoAdvancePolicy.eligibleSlideIndex(transition, enabled = true))
+    }
+
+    @Test
+    fun autoAdvanceDelay_shouldUseBackwardCompatibleDefaultAndClampRange() {
+        assertEquals(10, ProjectionOptions().autoAdvanceDelaySeconds)
+        assertEquals(false, ProjectionOptions().autoAdvanceEnabled)
+        assertEquals(3, AutoAdvancePolicy.normalizeDelay(2))
+        assertEquals(60, AutoAdvancePolicy.normalizeDelay(61))
+        assertEquals(3, AutoAdvancePolicy.adjustDelay(3, -1))
+        assertEquals(11, AutoAdvancePolicy.adjustDelay(10, 1))
+        assertEquals(60, AutoAdvancePolicy.adjustDelay(60, 1))
+    }
 }

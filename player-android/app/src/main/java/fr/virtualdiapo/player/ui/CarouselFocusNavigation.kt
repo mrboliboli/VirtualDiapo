@@ -26,5 +26,14 @@ fun moveCarouselFocus(
     }
 }
 
-fun maximumSettingsIndex(mode: ServerMode): Int =
-    if (mode == ServerMode.MANUAL) 4 else 2
+data class SettingsFocusLayout(
+    val autoAdvanceEnabled: Boolean,
+    val serverMode: ServerMode,
+) {
+    val autoAdvanceIndex = 2
+    val durationIndex: Int? = if (autoAdvanceEnabled) 3 else null
+    val serverModeIndex = if (autoAdvanceEnabled) 4 else 3
+    val manualAddressIndex: Int? = if (serverMode == ServerMode.MANUAL) serverModeIndex + 1 else null
+    val manualTestIndex: Int? = if (serverMode == ServerMode.MANUAL) serverModeIndex + 2 else null
+    val maximumIndex = manualTestIndex ?: serverModeIndex
+}

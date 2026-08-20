@@ -56,6 +56,7 @@ import fr.virtualdiapo.player.network.ServerAddressValidator
 import fr.virtualdiapo.player.network.preferredServerAddress
 import fr.virtualdiapo.player.network.VirtualDiapoDiscovery
 import fr.virtualdiapo.player.projection.MechanicalSoundPlayer
+import fr.virtualdiapo.player.projection.AutoAdvancePolicy
 import fr.virtualdiapo.player.projection.PreloadWindow
 import fr.virtualdiapo.player.projection.ProjectionBeamGeometry
 import fr.virtualdiapo.player.projection.ProjectionDust
@@ -316,6 +317,14 @@ private fun ProjectionScreen(
     LaunchedEffect(projection.preloadWindowIndex()) {
         val currentIndex = projection.preloadWindowIndex() ?: return@LaunchedEffect
         preloader.updateWindow(currentIndex)
+    }
+    LaunchedEffect(projection, options.autoAdvanceEnabled, options.autoAdvanceDelaySeconds) {
+        val slideIndex = AutoAdvancePolicy.eligibleSlideIndex(
+            state = projection,
+            enabled = options.autoAdvanceEnabled,
+        ) ?: return@LaunchedEffect
+        delay(AutoAdvancePolicy.normalizeDelay(options.autoAdvanceDelaySeconds) * 1_000L)
+        if (projection == ProjectionState.Slide(slideCount, slideIndex)) move(1)
     }
 
     Box(
