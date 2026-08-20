@@ -50,9 +50,15 @@ class SlidePreloader(
     }
 
     suspend fun ensure(index: Int) {
+        if (isReady(index)) return
         val result = imageLoader.execute(request(index))
         check(result is SuccessResult) { "Impossible de préparer la diapositive" }
         result.memoryCacheKey?.let { cacheKeys[index] = it }
+    }
+
+    fun isReady(index: Int): Boolean {
+        val cacheKey = cacheKeys[index] ?: return false
+        return imageLoader.memoryCache?.get(cacheKey) != null
     }
 
     private suspend fun load(indices: List<Int>): List<Boolean> = coroutineScope {

@@ -47,6 +47,5 @@ class MechanicalSoundPlayer(context: Context) {
 
     companion object {
         private const val TAG = "MechanicalSoundPlayer"
-        const val SLIDE_APPEAR_TIME_MS = 1_690L
     }
 }

@@ -5,6 +5,13 @@ import org.junit.Test
 
 class ProjectionTransitionTest {
     @Test
+    fun timeline_shouldMoveImmediatelyAndFinishAtFiveHundredTwentyMilliseconds() {
+        assertEquals(0L, ProjectionTransition.MOVEMENT_START_MS)
+        assertEquals(260L, ProjectionTransition.SOUND_CLICK_MS)
+        assertEquals(520L, ProjectionTransition.TOTAL_DURATION_MS)
+    }
+
+    @Test
     fun outgoing_shouldTravelPastViewport_whenMovingForward() {
         // WHEN
         val transform = ProjectionTransition.outgoing(
@@ -34,8 +41,15 @@ class ProjectionTransitionTest {
 
     @Test
     fun transforms_shouldRemainOpaque_whenFadeIsDisabled() {
-        assertEquals(1f, ProjectionTransition.outgoing(1_900L, 1, false).photoAlpha, 0f)
-        assertEquals(1f, ProjectionTransition.incoming(1_450L, 1, false).photoAlpha, 0f)
+        assertEquals(1f, ProjectionTransition.outgoing(500L, 1, false).photoAlpha, 0f)
+        assertEquals(1f, ProjectionTransition.incoming(20L, 1, false).photoAlpha, 0f)
+    }
+
+    @Test
+    fun navigation_shouldAcceptOnlyInitialKeyDown() {
+        assertEquals(true, ProjectionNavigation.acceptsKeyDown(isKeyDown = true, repeatCount = 0))
+        assertEquals(false, ProjectionNavigation.acceptsKeyDown(isKeyDown = true, repeatCount = 1))
+        assertEquals(false, ProjectionNavigation.acceptsKeyDown(isKeyDown = false, repeatCount = 0))
     }
 
     @Test

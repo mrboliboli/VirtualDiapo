@@ -37,6 +37,21 @@ class ProjectionStateTest {
     }
 
     @Test
+    fun preloadWindowIndex_shouldBecomeAvailableOnlyAfterTargetSlideIsRevealed() {
+        // GIVEN
+        val transition = ProjectionState.Slide(4, 1)
+            .beginMove(1)!!
+            .beginMechanicalTransition()!!
+
+        // WHEN
+        val revealed = transition.reveal()
+
+        // THEN
+        assertNull(transition.preloadWindowIndex())
+        assertEquals(2, revealed.preloadWindowIndex())
+    }
+
+    @Test
     fun `previous from black end returns to last real slide`() {
         val transition = ProjectionState.EndOfCarousel(3).beginMove(-1)!!.beginMechanicalTransition()!!
 

@@ -101,6 +101,11 @@ sealed interface ProjectionState {
         else -> null
     }
 
+    fun preloadWindowIndex(): Int? = when (this) {
+        is Slide -> index
+        else -> null
+    }
+
     fun reveal(): ProjectionState = when (this) {
         is Transition -> when (val target = destination) {
             is Destination.Slide -> Slide(slideCount, target.index)

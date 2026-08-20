@@ -15,9 +15,9 @@ data class SlideTransform(
 )
 
 object ProjectionTransition {
-    const val MOVEMENT_START_MS = 1_430L
-    const val SOUND_CLICK_MS = 1_690L
-    const val TOTAL_DURATION_MS = 1_950L
+    const val MOVEMENT_START_MS = 0L
+    const val SOUND_CLICK_MS = 260L
+    const val TOTAL_DURATION_MS = 520L
     private const val TRAVEL_WIDTH_FACTOR = 1.08f
 
     fun outgoing(elapsedMs: Long, direction: Int, fadeEnabled: Boolean): SlideTransform {
@@ -74,6 +74,11 @@ object ProjectionTransition {
             3f * inverse * time * time * second +
             time * time * time
     }
+}
+
+object ProjectionNavigation {
+    fun acceptsKeyDown(isKeyDown: Boolean, repeatCount: Int): Boolean =
+        isKeyDown && repeatCount == 0
 }
 
 object ProjectionBeamGeometry {

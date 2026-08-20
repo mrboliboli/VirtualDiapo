@@ -60,6 +60,7 @@ import fr.virtualdiapo.player.projection.PreloadWindow
 import fr.virtualdiapo.player.projection.ProjectionBeamGeometry
 import fr.virtualdiapo.player.projection.ProjectionDust
 import fr.virtualdiapo.player.projection.ProjectionPreferences
+import fr.virtualdiapo.player.projection.ProjectionNavigation
 import fr.virtualdiapo.player.projection.ProjectionState
 import fr.virtualdiapo.player.projection.ProjectionTransition
 import fr.virtualdiapo.player.projection.SlidePreloader
@@ -312,8 +313,8 @@ private fun ProjectionScreen(
             sound.release()
         }
     }
-    LaunchedEffect(projection.settledPosition()) {
-        val currentIndex = (projection as? ProjectionState.Slide)?.index ?: return@LaunchedEffect
+    LaunchedEffect(projection.preloadWindowIndex()) {
+        val currentIndex = projection.preloadWindowIndex() ?: return@LaunchedEffect
         preloader.updateWindow(currentIndex)
     }
 
@@ -323,12 +324,18 @@ private fun ProjectionScreen(
             .focusRequester(projectionFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyUp) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.DirectionRight, Key.Enter, Key.NumPadEnter, Key.MediaNext -> move(1)
-                    Key.DirectionLeft, Key.MediaPrevious -> move(-1)
+                val delta = when (event.key) {
+                    Key.DirectionRight, Key.Enter, Key.NumPadEnter, Key.MediaNext -> 1
+                    Key.DirectionLeft, Key.MediaPrevious -> -1
                     else -> return@onPreviewKeyEvent false
                 }
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val acceptsKeyDown = ProjectionNavigation.acceptsKeyDown(
+                    isKeyDown = true,
+                    repeatCount = event.nativeKeyEvent.repeatCount,
+                )
+                if (!acceptsKeyDown) return@onPreviewKeyEvent true
+                move(delta)
                 true
             },
         contentAlignment = Alignment.Center,
